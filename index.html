@@ -2111,7 +2111,7 @@
       const ix = ic.getContext('2d');
       const frame = birdFrames[1]; // wings mid
       const px = 4;
-      const col = { body: '#53d769', wing: '#45b85a', eye: '#111', beak: '#e9c946' };
+      const col = randomBirdColor();
       for (let r = 0; r < frame.length; r++) {
         for (let c = 0; c < frame[r].length; c++) {
           const v = frame[r][c];
