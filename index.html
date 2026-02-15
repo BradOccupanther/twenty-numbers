@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Twenty Numbers</title>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -390,22 +392,23 @@
     .hint-box {
       position: absolute;
       right: calc(50% + 190px);
-      padding: 8px 12px;
+      padding: 14px 20px;
       background: rgba(22,33,62,0.95);
-      border: 1px solid #e94560;
-      border-radius: 8px;
-      font-size: 0.78rem;
+      border: 2px solid #e94560;
+      border-radius: 10px;
+      font-size: 1.1rem;
       color: #ddd;
       line-height: 1.4;
       text-align: left;
-      max-width: 220px;
+      min-width: 140px;
     }
 
     .hint-box .hint-title {
       color: #e94560;
       font-weight: bold;
-      margin-bottom: 4px;
-      font-size: 0.82rem;
+      margin-bottom: 6px;
+      font-size: 1.2rem;
+      white-space: nowrap;
     }
 
     .hint-box .hint-best {
@@ -416,6 +419,30 @@
     .hint-box .hint-dim {
       color: #999;
       font-size: 0.72rem;
+    }
+
+    .bird-counter {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: #16213e;
+      border: 2px solid #0f3460;
+      border-radius: 10px;
+      padding: 10px 18px;
+      z-index: 2;
+    }
+
+    .bird-counter canvas {
+      image-rendering: pixelated;
+    }
+
+    .bird-counter span {
+      font-size: 1.6rem;
+      font-weight: bold;
+      color: #fff;
     }
 
     .hidden { display: none; }
@@ -430,7 +457,7 @@
       pointer-events: none;
     }
 
-    body > *:not(#birdCanvas):not(.overlay):not(.leaderboard-panel) {
+    body > *:not(#birdCanvas):not(.overlay):not(.leaderboard-panel):not(.bird-counter) {
       position: relative;
       z-index: 1;
     }
@@ -455,6 +482,11 @@
       <button id="undoLbBtn" class="hidden" onclick="undoLeaderboard()">Undo</button>
       <button id="addLbBtn" class="hidden" onclick="addPlayer()">+ Add</button>
     </div>
+  </div>
+
+  <div class="bird-counter">
+    <canvas id="birdIcon" width="36" height="28"></canvas>
+    <span id="birdCount">0</span>
   </div>
 
   <div class="game-area">
@@ -549,13 +581,37 @@
       // Richard Przybek: 1 (1x2,3)
       {name:'Richard Przybek',score:1},{name:'Richard Przybek',score:1},{name:'Richard Przybek',score:1},{name:'Richard Przybek',score:3},
     ];
-    // Reset leaderboard with seed data (bump version to re-seed)
-    const LB_VERSION = 'v3';
-    if (localStorage.getItem('twentyNumbers_lb_version') !== LB_VERSION) {
-      localStorage.setItem('twentyNumbers_leaderboard', JSON.stringify(defaultLeaderboard));
-      localStorage.setItem('twentyNumbers_lb_version', LB_VERSION);
+    // Firebase setup
+    firebase.initializeApp({
+      apiKey: "AIzaSyB9QDkYwDt_jof6h6Jcy60SlxOA1yVfW3Y",
+      authDomain: "twenty-numbers-14d6d.firebaseapp.com",
+      databaseURL: "https://twenty-numbers-14d6d-default-rtdb.firebaseio.com",
+      projectId: "twenty-numbers-14d6d",
+      storageBucket: "twenty-numbers-14d6d.firebasestorage.app",
+      messagingSenderId: "377433340100",
+      appId: "1:377433340100:web:515e75ee0402d2f52bb191"
+    });
+    const db = firebase.database();
+    const lbRef = db.ref('leaderboard');
+
+    let leaderboard = [];
+
+    function saveLeaderboard() {
+      lbRef.set(leaderboard);
     }
-    let leaderboard = JSON.parse(localStorage.getItem('twentyNumbers_leaderboard') || '[]');
+
+    // Realtime listener - syncs leaderboard across all clients
+    lbRef.on('value', (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        leaderboard = data;
+      } else {
+        // First ever load - seed with defaults
+        leaderboard = defaultLeaderboard;
+        saveLeaderboard();
+      }
+      renderLeaderboard(currentPlayer);
+    });
 
     function randInt(min, max) {
       return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -627,6 +683,17 @@
       const rect = numBox.getBoundingClientRect();
       const parentRect = numBox.offsetParent.getBoundingClientRect();
       hintBox.style.top = (rect.bottom - parentRect.top + 8) + 'px';
+      hintBox.style.width = rect.width + 'px';
+      // Shrink font to fit on one line
+      const title = hintBox.querySelector('.hint-title');
+      if (title) {
+        title.style.fontSize = '1.2rem';
+        title.style.whiteSpace = 'nowrap';
+        const maxW = hintBox.clientWidth - parseFloat(getComputedStyle(hintBox).paddingLeft) - parseFloat(getComputedStyle(hintBox).paddingRight);
+        while (title.scrollWidth > maxW && parseFloat(title.style.fontSize) > 0.5) {
+          title.style.fontSize = (parseFloat(title.style.fontSize) - 0.05) + 'rem';
+        }
+      }
     }
 
     function showSpinButton() {
@@ -903,7 +970,7 @@
       // Save to leaderboard
       leaderboard.push({ name: currentPlayer, score: placed });
       leaderboard.sort((a, b) => b.score - a.score);
-      localStorage.setItem('twentyNumbers_leaderboard', JSON.stringify(leaderboard));
+      saveLeaderboard();
       renderLeaderboard(currentPlayer);
       document.getElementById('restartBtn').classList.remove('hidden');
       skyTarget = 1;
@@ -929,7 +996,7 @@
     function deletePlayer(name) {
       pushUndo();
       leaderboard = leaderboard.filter(e => e.name !== name);
-      localStorage.setItem('twentyNumbers_leaderboard', JSON.stringify(leaderboard));
+      saveLeaderboard();
       renderLeaderboard(null);
     }
 
@@ -938,7 +1005,7 @@
       const newScores = value.split(/[,\s]+/).map(Number).filter(n => !isNaN(n) && n > 0);
       leaderboard = leaderboard.filter(e => e.name !== name);
       for (const s of newScores) leaderboard.push({ name, score: s });
-      localStorage.setItem('twentyNumbers_leaderboard', JSON.stringify(leaderboard));
+      saveLeaderboard();
       renderLeaderboard(null);
     }
 
@@ -947,21 +1014,21 @@
       if (!newName || newName === oldName) return;
       pushUndo();
       for (const e of leaderboard) { if (e.name === oldName) e.name = newName; }
-      localStorage.setItem('twentyNumbers_leaderboard', JSON.stringify(leaderboard));
+      saveLeaderboard();
       renderLeaderboard(null);
     }
 
     function addPlayer() {
       pushUndo();
       leaderboard.push({ name: 'New Player', score: 0 });
-      localStorage.setItem('twentyNumbers_leaderboard', JSON.stringify(leaderboard));
+      saveLeaderboard();
       renderLeaderboard(null);
     }
 
     function undoLeaderboard() {
       if (undoStack.length === 0) return;
       leaderboard = JSON.parse(undoStack.pop());
-      localStorage.setItem('twentyNumbers_leaderboard', JSON.stringify(leaderboard));
+      saveLeaderboard();
       if (undoStack.length === 0) document.getElementById('undoLbBtn').classList.add('hidden');
       renderLeaderboard(null);
     }
@@ -1532,7 +1599,32 @@
       }
 
       drawLightning();
+      updateBirdCount();
       requestAnimationFrame(animateBirds);
+    }
+
+    // Draw bird icon for counter
+    (function drawBirdIcon() {
+      const ic = document.getElementById('birdIcon');
+      const ix = ic.getContext('2d');
+      const frame = birdFrames[1]; // wings mid
+      const px = 4;
+      const col = { body: '#53d769', wing: '#45b85a', eye: '#111', beak: '#e9c946' };
+      for (let r = 0; r < frame.length; r++) {
+        for (let c = 0; c < frame[r].length; c++) {
+          const v = frame[r][c];
+          if (v === 0) continue;
+          if (v === 1) ix.fillStyle = col.body;
+          else if (v === 2) ix.fillStyle = col.wing;
+          else if (v === 3) ix.fillStyle = col.eye;
+          else if (v === 4) ix.fillStyle = col.beak;
+          ix.fillRect(c * px, r * px, px, px);
+        }
+      }
+    })();
+
+    function updateBirdCount() {
+      document.getElementById('birdCount').textContent = birds.filter(b => !b.falling).length;
     }
 
     renderLeaderboard(null);
