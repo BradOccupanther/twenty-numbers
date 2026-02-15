@@ -1,0 +1,1542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Twenty Numbers</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: transparent;
+      color: #eee;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 10px;
+    }
+
+    .game-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 0;
+    }
+
+    .leaderboard-panel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      width: fit-content;
+      background: rgba(22,33,62,0.85);
+      border: 2px solid #0f3460;
+      border-radius: 10px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      z-index: 2;
+    }
+
+    .leaderboard-panel .lb-title {
+      font-size: 0.95rem;
+      font-weight: bold;
+      color: #fff;
+      text-align: center;
+      margin-bottom: 8px;
+    }
+
+    .leaderboard-panel .lb-list {
+      overflow-y: auto;
+      min-height: 0;
+    }
+
+    h1 {
+      font-size: 2.2rem;
+      margin-bottom: 4px;
+      color: #fff;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    }
+
+    .subtitle {
+      color: #fff;
+      margin-bottom: 8px;
+      text-align: center;
+      max-width: 700px;
+      font-size: 1.05rem;
+      line-height: 1.3;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+    }
+
+    .game-row {
+      position: relative;
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      width: 100%;
+      justify-content: center;
+    }
+
+    .current-number, .score-box {
+      position: absolute;
+      top: 5vh;
+      background: #16213e;
+      border: 3px solid #53d769;
+      border-radius: 12px;
+      padding: 16px 36px;
+      text-align: center;
+      transition: border-color 0.3s;
+      min-width: 140px;
+    }
+
+    .current-number { right: calc(50% + 190px); }
+    .score-box { left: calc(50% + 190px); }
+
+    .current-number.gameover, .score-box.gameover {
+      border-color: #e94560;
+    }
+
+    .current-number .label, .score-box .label {
+      font-size: 1.1rem;
+      color: #aaa;
+      margin-bottom: 6px;
+    }
+
+    .current-number .number, .score-box .number {
+      font-size: 2.8rem;
+      font-weight: bold;
+      color: #53d769;
+      transition: color 0.3s;
+    }
+
+    .current-number.gameover .number, .score-box.gameover .number {
+      color: #e94560;
+    }
+
+    .current-number.spinning {
+      border-color: #e9c946;
+      box-shadow: 0 0 20px rgba(233, 201, 70, 0.4);
+    }
+
+    .current-number.spinning .number {
+      color: #e9c946;
+    }
+
+    .current-number.revealed {
+      animation: revealPop 0.4s ease-out;
+    }
+
+    @keyframes revealPop {
+      0% { transform: scale(1); }
+      40% { transform: scale(1.12); }
+      100% { transform: scale(1); }
+    }
+
+    .spin-btn {
+      margin-top: 10px;
+      padding: 10px 32px;
+      font-size: 1.1rem;
+      font-weight: bold;
+      letter-spacing: 2px;
+      background: linear-gradient(135deg, #53d769, #45b85a);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: transform 0.1s, box-shadow 0.15s;
+      box-shadow: 0 3px 12px rgba(83, 215, 105, 0.4);
+    }
+
+    .spin-btn:hover {
+      transform: scale(1.06);
+      box-shadow: 0 4px 18px rgba(83, 215, 105, 0.6);
+    }
+
+    .spin-btn:active {
+      transform: scale(0.97);
+    }
+
+    .table-container {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 2px;
+      width: 100%;
+      max-width: 340px;
+      align-self: stretch;
+      min-height: 0;
+    }
+
+    .slot {
+      display: flex;
+      align-items: center;
+      background: #16213e;
+      border: 2px solid #0f3460;
+      border-radius: 6px;
+      padding: 0 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      user-select: none;
+      min-height: 0;
+    }
+
+    .slot:hover:not(.filled):not(.invalid) {
+      border-color: #e94560;
+      background: #1a1a3e;
+    }
+
+    .slot.valid {
+      border-color: #53d769;
+      box-shadow: 0 0 8px rgba(83, 215, 105, 0.25);
+    }
+
+    .slot.valid:hover {
+      background: #1a2e1a;
+      border-color: #53d769;
+    }
+
+    .slot.filled {
+      cursor: default;
+      background: #0f3460;
+      border-color: #0f3460;
+    }
+
+    .slot.invalid {
+      cursor: not-allowed;
+      opacity: 0.4;
+    }
+
+    .slot .slot-index {
+      font-weight: bold;
+      color: #fff;
+      min-width: 24px;
+      font-size: 0.75rem;
+    }
+
+    .slot .slot-value {
+      flex: 1;
+      text-align: center;
+      font-size: 0.9rem;
+      font-weight: bold;
+    }
+
+    .slot.filled .slot-value {
+      color: #fff;
+    }
+
+    .slot:not(.filled) .slot-value {
+      color: #555;
+    }
+
+    .message {
+      margin-top: 6px;
+      font-size: 1rem;
+      font-weight: bold;
+      text-align: center;
+      min-height: 24px;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+    }
+
+    .message.win { color: #53d769; }
+    .message.lose { color: #fff; }
+
+    button.restart {
+      margin-top: 6px;
+      padding: 8px 24px;
+      font-size: 0.9rem;
+      font-weight: bold;
+      background: #e94560;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    button.restart:hover {
+      background: #c73651;
+    }
+
+    .overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+
+    .overlay-box {
+      background: #16213e;
+      border: 2px solid #0f3460;
+      border-radius: 12px;
+      padding: 20px 28px;
+      text-align: center;
+      min-width: 240px;
+    }
+
+    .overlay-title {
+      font-size: 1.2rem;
+      font-weight: bold;
+      margin-bottom: 12px;
+      color: #fff;
+    }
+
+    .overlay-box input {
+      width: 100%;
+      padding: 8px 12px;
+      font-size: 1rem;
+      border: 2px solid #0f3460;
+      border-radius: 6px;
+      background: #1a1a2e;
+      color: #fff;
+      margin-bottom: 12px;
+      outline: none;
+      text-align: center;
+    }
+
+    .overlay-box input:focus {
+      border-color: #53d769;
+    }
+
+    .overlay-box button {
+      padding: 8px 24px;
+      font-size: 0.9rem;
+      font-weight: bold;
+      background: #53d769;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .overlay-box button:hover {
+      background: #45b85a;
+    }
+
+    .lb-row {
+      display: flex;
+      padding: 3px 6px;
+      font-size: 0.95rem;
+      border-radius: 4px;
+    }
+
+    .lb-row:nth-child(odd) {
+      background: rgba(255,255,255,0.05);
+    }
+
+    .lb-row.highlight {
+      background: rgba(233,69,96,0.25);
+      font-weight: bold;
+    }
+
+    .lb-rank { color: #aaa; width: 20px; display: flex; align-items: center; margin-right: 6px; }
+    .lb-rank img { width: 16px; height: 16px; image-rendering: pixelated; }
+    .lb-name { color: #fff; white-space: nowrap; margin-right: 8px; }
+    .lb-best { color: #53d769; font-weight: bold; width: 22px; margin-right: 8px; }
+    .lb-hist { color: #aaa; font-size: 0.8rem; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .lb-edit-input {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid #0f3460;
+      border-radius: 3px;
+      color: #fff;
+      font-size: 0.8rem;
+      padding: 1px 4px;
+      outline: none;
+      min-width: 0;
+    }
+    .lb-edit-input:focus { border-color: #53d769; }
+    .lb-name-input { width: 130px; margin-right: 8px; }
+    .lb-scores-input { flex: 1; }
+    .lb-del {
+      color: #e94560;
+      cursor: pointer;
+      margin-left: 4px;
+      font-size: 0.7rem;
+      opacity: 0.7;
+    }
+    .lb-del:hover { opacity: 1; }
+
+    .lb-footer {
+      margin-top: 6px;
+      text-align: center;
+      display: flex;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .lb-footer button {
+      font-size: 0.7rem;
+      padding: 3px 10px;
+      background: rgba(255,255,255,0.1);
+      color: #aaa;
+      border: 1px solid #0f3460;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .lb-footer button:hover {
+      background: rgba(255,255,255,0.2);
+      color: #fff;
+    }
+
+    .hint-box {
+      position: absolute;
+      right: calc(50% + 190px);
+      padding: 8px 12px;
+      background: rgba(22,33,62,0.95);
+      border: 1px solid #e94560;
+      border-radius: 8px;
+      font-size: 0.78rem;
+      color: #ddd;
+      line-height: 1.4;
+      text-align: left;
+      max-width: 220px;
+    }
+
+    .hint-box .hint-title {
+      color: #e94560;
+      font-weight: bold;
+      margin-bottom: 4px;
+      font-size: 0.82rem;
+    }
+
+    .hint-box .hint-best {
+      color: #53d769;
+      font-weight: bold;
+    }
+
+    .hint-box .hint-dim {
+      color: #999;
+      font-size: 0.72rem;
+    }
+
+    .hidden { display: none; }
+
+    #birdCanvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    body > *:not(#birdCanvas):not(.overlay):not(.leaderboard-panel) {
+      position: relative;
+      z-index: 1;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="birdCanvas"></canvas>
+
+  <div id="nameOverlay" class="overlay">
+    <div class="overlay-box">
+      <div class="overlay-title">Enter Your Name</div>
+      <input type="text" id="nameInput" maxlength="20" placeholder="Name..." autofocus>
+      <button id="nameBtn" onclick="submitName()">Play</button>
+    </div>
+  </div>
+
+  <div class="leaderboard-panel">
+    <div class="lb-title">Leaderboard</div>
+    <div class="lb-list" id="leaderboardList"></div>
+    <div class="lb-footer">
+      <button id="editLbBtn" onclick="toggleEditMode()">Edit</button>
+      <button id="undoLbBtn" class="hidden" onclick="undoLeaderboard()">Undo</button>
+      <button id="addLbBtn" class="hidden" onclick="addPlayer()">+ Add</button>
+    </div>
+  </div>
+
+  <div class="game-area">
+    <h1>Twenty Numbers</h1>
+    <p class="subtitle">Place each random number (1&ndash;1000) into a slot. Numbers must stay in ascending order from slot 1 to 20. If there's nowhere to place a number, you lose!</p>
+
+    <div class="game-row">
+      <div class="current-number hidden" id="numberBox">
+        <div class="label" id="numberLabel">Place this number:</div>
+        <div class="number" id="currentNum">—</div>
+        <button class="spin-btn hidden" id="spinBtn" onclick="spinReveal()">Next Number</button>
+      </div>
+      <div class="hint-box hidden" id="hintBox"></div>
+      <div class="table-container" id="grid"></div>
+      <div class="score-box hidden" id="scoreBox">
+        <div class="label" id="scoreLabel">Score:</div>
+        <div class="number" id="scoreNum">0</div>
+      </div>
+    </div>
+
+    <div class="message" id="message"></div>
+    <button class="restart hidden" id="restartBtn" onclick="showNamePrompt()">Play Again</button>
+  </div>
+
+  <script>
+    const SLOTS = 20;
+    const MIN = 1;
+    const MAX = 1000;
+
+    let slots;       // array of 20: null or number
+    let currentNum;   // the number to place
+    let gameOver;
+    let placed;
+    let currentPlayer = '';
+    const defaultLeaderboard = [
+      // Katie Newman: 17 (15,12,10)
+      {name:'Katie Newman',score:17},{name:'Katie Newman',score:15},{name:'Katie Newman',score:12},{name:'Katie Newman',score:10},
+      // Eric Lindgren: 17 (13x2,10,9,7x3,4)
+      {name:'Eric Lindgren',score:17},{name:'Eric Lindgren',score:13},{name:'Eric Lindgren',score:13},{name:'Eric Lindgren',score:10},{name:'Eric Lindgren',score:9},{name:'Eric Lindgren',score:7},{name:'Eric Lindgren',score:7},{name:'Eric Lindgren',score:7},{name:'Eric Lindgren',score:4},
+      // Thomas Gray: 16 (8)
+      {name:'Thomas Gray',score:16},{name:'Thomas Gray',score:8},
+      // Rachel Ignasiak: 16
+      {name:'Rachel Ignasiak',score:16},
+      // Rupin Sharma: 15 (15,14,13,12,11,9,4)
+      {name:'Rupin Sharma',score:15},{name:'Rupin Sharma',score:15},{name:'Rupin Sharma',score:14},{name:'Rupin Sharma',score:13},{name:'Rupin Sharma',score:12},{name:'Rupin Sharma',score:11},{name:'Rupin Sharma',score:9},{name:'Rupin Sharma',score:4},
+      // Becca Oberhelman: 15 (14)
+      {name:'Becca Oberhelman',score:15},{name:'Becca Oberhelman',score:14},
+      // Daniel Rychel: 15 (13,1)
+      {name:'Daniel Rychel',score:15},{name:'Daniel Rychel',score:13},{name:'Daniel Rychel',score:1},
+      // Harper Brooks-Kahn: 15 (8,7,6)
+      {name:'Harper Brooks-Kahn',score:15},{name:'Harper Brooks-Kahn',score:8},{name:'Harper Brooks-Kahn',score:7},{name:'Harper Brooks-Kahn',score:6},
+      // Aden Chon: 15
+      {name:'Aden Chon',score:15},
+      // Greg Edwards: 14 (14,12,11,10,8x3,4)
+      {name:'Greg Edwards',score:14},{name:'Greg Edwards',score:14},{name:'Greg Edwards',score:12},{name:'Greg Edwards',score:11},{name:'Greg Edwards',score:10},{name:'Greg Edwards',score:8},{name:'Greg Edwards',score:8},{name:'Greg Edwards',score:8},{name:'Greg Edwards',score:4},
+      // Zeb Taylor: 14 (12,11x2,10x2,9x2)
+      {name:'Zeb Taylor',score:14},{name:'Zeb Taylor',score:12},{name:'Zeb Taylor',score:11},{name:'Zeb Taylor',score:11},{name:'Zeb Taylor',score:10},{name:'Zeb Taylor',score:10},{name:'Zeb Taylor',score:9},{name:'Zeb Taylor',score:9},
+      // Andrew W Lee: 14 (7x2)
+      {name:'Andrew W Lee',score:14},{name:'Andrew W Lee',score:7},{name:'Andrew W Lee',score:7},
+      // Nick Des Biens: 14 (6)
+      {name:'Nick Des Biens',score:14},{name:'Nick Des Biens',score:6},
+      // Jason Taylor: 14
+      {name:'Jason Taylor',score:14},
+      // Matt Koutsoutis: 13 (9)
+      {name:'Matt Koutsoutis',score:13},{name:'Matt Koutsoutis',score:9},
+      // Patrick Murphy: 13
+      {name:'Patrick Murphy',score:13},
+      // Brad Munsterteiger: 12 (11,10,9,6)
+      {name:'Brad Munsterteiger',score:12},{name:'Brad Munsterteiger',score:11},{name:'Brad Munsterteiger',score:10},{name:'Brad Munsterteiger',score:9},{name:'Brad Munsterteiger',score:6},
+      // Alejandro Hernandez: 12 (10,8x3)
+      {name:'Alejandro Hernandez',score:12},{name:'Alejandro Hernandez',score:10},{name:'Alejandro Hernandez',score:8},{name:'Alejandro Hernandez',score:8},{name:'Alejandro Hernandez',score:8},
+      // Rachel Liu: 12 (9,4)
+      {name:'Rachel Liu',score:12},{name:'Rachel Liu',score:9},{name:'Rachel Liu',score:4},
+      // Olivia M Lee: 11 (10)
+      {name:'Olivia M Lee',score:11},{name:'Olivia M Lee',score:10},
+      // Connoroo Baker: 11 (7)
+      {name:'Connoroo Baker',score:11},{name:'Connoroo Baker',score:7},
+      // David Dreiser: 8
+      {name:'David Dreiser',score:8},
+      // Luke Breyer: 8
+      {name:'Luke Breyer',score:8},
+      // Kristine Lin: 8
+      {name:'Kristine Lin',score:8},
+      // Michael Roy: 7
+      {name:'Michael Roy',score:7},
+      // Hassan Nejmeldeen: 7
+      {name:'Hassan Nejmeldeen',score:7},
+      // Zack Reavis: 6
+      {name:'Zack Reavis',score:6},
+      // Matthew Duthaler: 4 (3)
+      {name:'Matthew Duthaler',score:4},{name:'Matthew Duthaler',score:3},
+      // Richard Przybek: 1 (1x2,3)
+      {name:'Richard Przybek',score:1},{name:'Richard Przybek',score:1},{name:'Richard Przybek',score:1},{name:'Richard Przybek',score:3},
+    ];
+    // Reset leaderboard with seed data (bump version to re-seed)
+    const LB_VERSION = 'v3';
+    if (localStorage.getItem('twentyNumbers_lb_version') !== LB_VERSION) {
+      localStorage.setItem('twentyNumbers_leaderboard', JSON.stringify(defaultLeaderboard));
+      localStorage.setItem('twentyNumbers_lb_version', LB_VERSION);
+    }
+    let leaderboard = JSON.parse(localStorage.getItem('twentyNumbers_leaderboard') || '[]');
+
+    function randInt(min, max) {
+      return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    function submitName() {
+      const name = document.getElementById('nameInput').value.trim();
+      if (!name) return;
+      currentPlayer = name;
+      document.getElementById('nameOverlay').classList.add('hidden');
+      startGame();
+    }
+
+    document.getElementById('nameInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submitName();
+    });
+
+    function showNamePrompt() {
+      document.getElementById('nameOverlay').classList.remove('hidden');
+      document.getElementById('nameInput').value = currentPlayer;
+      document.getElementById('nameInput').focus();
+      document.getElementById('nameInput').select();
+    }
+
+    let spinning = false;
+    let waitingForSpin = false;
+
+    function startGame() {
+      slots = new Array(SLOTS).fill(null);
+      gameOver = false;
+      placed = 0;
+      spinning = false;
+      waitingForSpin = false;
+      document.getElementById('message').textContent = '';
+      document.getElementById('message').className = 'message';
+      document.getElementById('restartBtn').classList.add('hidden');
+      document.getElementById('numberBox').classList.remove('hidden', 'gameover', 'spinning', 'revealed');
+      document.getElementById('hintBox').classList.add('hidden');
+      document.getElementById('numberLabel').textContent = 'Place this number:';
+      document.getElementById('scoreBox').classList.add('hidden');
+      document.getElementById('scoreBox').classList.remove('gameover');
+      document.getElementById('scoreLabel').textContent = 'Score:';
+      document.getElementById('scoreNum').textContent = '0';
+      // On restart, animate sky through night and dawn back to day
+      if (skyTime > 0) {
+        skyTarget = 4;
+        skySpeed = 0.015;
+      }
+      buildGrid();
+      revealImmediate();
+    }
+
+    function buildGrid() {
+      const grid = document.getElementById('grid');
+      grid.innerHTML = '';
+      for (let i = 0; i < SLOTS; i++) {
+        const el = document.createElement('div');
+        el.className = 'slot';
+        el.dataset.index = i;
+        el.innerHTML = `<div class="slot-index">#${i + 1}</div><div class="slot-value">—</div>`;
+        el.addEventListener('click', () => onSlotClick(i));
+        grid.appendChild(el);
+      }
+    }
+
+    function positionHintBox() {
+      const numBox = document.getElementById('numberBox');
+      const hintBox = document.getElementById('hintBox');
+      const rect = numBox.getBoundingClientRect();
+      const parentRect = numBox.offsetParent.getBoundingClientRect();
+      hintBox.style.top = (rect.bottom - parentRect.top + 8) + 'px';
+    }
+
+    function showSpinButton() {
+      waitingForSpin = true;
+      spinning = false;
+      const box = document.getElementById('numberBox');
+      box.classList.remove('spinning', 'revealed');
+      document.getElementById('numberLabel').textContent = 'Next number:';
+      document.getElementById('currentNum').textContent = '?';
+      document.getElementById('spinBtn').classList.remove('hidden');
+      positionHintBox();
+      // Grey out all empty slots while waiting
+      updateSlots();
+    }
+
+    function spinReveal() {
+      if (spinning) return;
+      waitingForSpin = false;
+      spinning = true;
+      document.getElementById('spinBtn').classList.add('hidden');
+      document.getElementById('hintBox').classList.add('hidden');
+      document.getElementById('numberLabel').textContent = '';
+
+      const box = document.getElementById('numberBox');
+      box.classList.add('spinning');
+
+      currentNum = randInt(MIN, MAX);
+
+      const numEl = document.getElementById('currentNum');
+      const digits = String(currentNum).split('');
+      const numDigits = digits.length;
+      let revealed = 0; // how many digits locked in so far
+
+      const digitDelay = 600;  // ms between each digit reveal
+      const cycleSpeed = 50;   // ms between random digit updates
+
+      function buildDisplay() {
+        let display = '';
+        for (let d = 0; d < numDigits; d++) {
+          if (d < revealed) {
+            display += digits[d];
+          } else {
+            display += randInt(0, 9);
+          }
+        }
+        return display;
+      }
+
+      let cycleTimer = null;
+
+      function startCycling() {
+        cycleTimer = setInterval(() => {
+          numEl.textContent = buildDisplay();
+        }, cycleSpeed);
+      }
+
+      function revealNextDigit() {
+        revealed++;
+        if (revealed >= numDigits) {
+          // All digits revealed
+          clearInterval(cycleTimer);
+          numEl.textContent = currentNum;
+          spinning = false;
+          box.classList.remove('spinning');
+          box.classList.add('revealed');
+          document.getElementById('numberLabel').textContent = 'Place this number:';
+          updateSlots();
+
+          if (!hasValidSlot(currentNum)) {
+            endGame(false);
+          }
+        } else {
+          // Schedule next digit reveal
+          setTimeout(revealNextDigit, digitDelay);
+        }
+      }
+
+      startCycling();
+      setTimeout(revealNextDigit, digitDelay);
+    }
+
+    function revealImmediate() {
+      currentNum = randInt(MIN, MAX);
+      document.getElementById('numberLabel').textContent = 'Place this number:';
+      document.getElementById('currentNum').textContent = currentNum;
+      document.getElementById('spinBtn').classList.add('hidden');
+      waitingForSpin = false;
+      spinning = false;
+      updateSlots();
+      if (!hasValidSlot(currentNum)) {
+        endGame(false);
+      }
+    }
+
+    function nextNumber() {
+      showSpinButton();
+    }
+
+    function getSlotElements() {
+      return document.querySelectorAll('#grid .slot');
+    }
+
+    function updateSlots() {
+      const elements = getSlotElements();
+      elements.forEach((el, i) => {
+        el.className = 'slot';
+        if (slots[i] !== null) {
+          el.classList.add('filled');
+          el.querySelector('.slot-value').textContent = slots[i];
+        } else if (gameOver || waitingForSpin || spinning) {
+          el.querySelector('.slot-value').textContent = '—';
+          if (!gameOver) el.classList.add('invalid');
+        } else if (isValidPlacement(i, currentNum)) {
+          el.classList.add('valid');
+          el.querySelector('.slot-value').textContent = '—';
+        } else {
+          el.classList.add('invalid');
+          el.querySelector('.slot-value').textContent = '—';
+        }
+      });
+    }
+
+    function isValidPlacement(index, num) {
+      if (slots[index] !== null) return false;
+
+      // Find nearest filled slot below this index
+      let lowerBound = MIN - 1;
+      for (let j = index - 1; j >= 0; j--) {
+        if (slots[j] !== null) { lowerBound = slots[j]; break; }
+      }
+
+      // Find nearest filled slot above this index
+      let upperBound = MAX + 1;
+      for (let j = index + 1; j < SLOTS; j++) {
+        if (slots[j] !== null) { upperBound = slots[j]; break; }
+      }
+
+      return num >= lowerBound && num <= upperBound;
+    }
+
+    function hasValidSlot(num) {
+      for (let i = 0; i < SLOTS; i++) {
+        if (isValidPlacement(i, num)) return true;
+      }
+      return false;
+    }
+
+    // --- Probability evaluation ---
+    function evaluateBoardState(testSlots) {
+      // Use log of the win probability for comparison
+      const p = computeWinProbability(testSlots);
+      return p <= 0 ? -Infinity : Math.log(p);
+    }
+
+    // Precompute log-factorials for the multinomial formula
+    const logFact = new Float64Array(SLOTS + 1);
+    for (let i = 2; i <= SLOTS; i++) logFact[i] = logFact[i - 1] + Math.log(i);
+
+    function computeWinProbability(testSlots) {
+      // Decompose board into gaps and compute:
+      // P(win) = K! / (k1!...km!) * product((ri / R)^ki)
+      // in log-space to avoid overflow.
+      // Ranges are inclusive of boundary values (game allows num >= lowerBound).
+      const R = MAX - MIN + 1; // 1000
+      const logR = Math.log(R);
+      let K = 0; // total empty
+      let logP = 0;
+      let prevVal = MIN - 1; // 0 (virtual left boundary)
+      let emptyInGap = 0;
+
+      for (let i = 0; i < SLOTS; i++) {
+        if (testSlots[i] !== null) {
+          if (emptyInGap > 0) {
+            // Inclusive range: [max(MIN, prevVal), testSlots[i]]
+            const lo = prevVal < MIN ? MIN : prevVal;
+            const r = testSlots[i] - lo + 1;
+            if (r < 1) return 0;
+            logP += emptyInGap * (Math.log(r) - logR) - logFact[emptyInGap];
+            K += emptyInGap;
+          }
+          prevVal = testSlots[i];
+          emptyInGap = 0;
+        } else {
+          emptyInGap++;
+        }
+      }
+      // Rightmost gap: [max(MIN, prevVal), MAX]
+      if (emptyInGap > 0) {
+        const lo = prevVal < MIN ? MIN : prevVal;
+        const r = MAX - lo + 1;
+        if (r < 1) return 0;
+        logP += emptyInGap * (Math.log(r) - logR) - logFact[emptyInGap];
+        K += emptyInGap;
+      }
+
+      if (K === 0) return 1;
+      logP += logFact[K]; // multiply by K!
+      return Math.exp(logP);
+    }
+
+    function onSlotClick(index) {
+      if (gameOver || spinning || waitingForSpin) return;
+      if (slots[index] !== null) return;
+      if (!isValidPlacement(index, currentNum)) return;
+
+      // Check if this move is suboptimal
+      let wasSuboptimal = false;
+      const hintBox = document.getElementById('hintBox');
+      const validSlots = [];
+      for (let i = 0; i < SLOTS; i++) {
+        if (isValidPlacement(i, currentNum)) validSlots.push(i);
+      }
+      if (validSlots.length > 1) {
+        let bestScore = -Infinity;
+        let bestSlot = index;
+        let chosenScore = -Infinity;
+        for (const s of validSlots) {
+          const testSlots = [...slots];
+          testSlots[s] = currentNum;
+          const score = evaluateBoardState(testSlots);
+          if (s === index) chosenScore = score;
+          if (score > bestScore) { bestScore = score; bestSlot = s; }
+        }
+        if (chosenScore < bestScore) {
+          wasSuboptimal = true;
+          spawnLightning();
+          hintBox.innerHTML =
+            `<div class="hint-title">Better move was <span class="hint-best">Slot #${bestSlot + 1}</span></div>`;
+          hintBox.classList.remove('hidden');
+          positionHintBox();
+        } else {
+          hintBox.classList.add('hidden');
+        }
+      } else {
+        hintBox.classList.add('hidden');
+      }
+
+      slots[index] = currentNum;
+      placed++;
+      document.getElementById('scoreNum').textContent = placed;
+      if (!wasSuboptimal) {
+        for (let i = 0; i < placed; i++) spawnBird();
+      }
+
+      if (placed === SLOTS) {
+        updateSlots();
+        endGame(true);
+        return;
+      }
+
+      nextNumber();
+    }
+
+    function endGame(won) {
+      gameOver = true;
+      waitingForSpin = false;
+      spinning = false;
+      updateSlots();
+      const box = document.querySelector('.current-number');
+      box.classList.remove('spinning', 'revealed');
+      box.classList.add('gameover');
+      document.getElementById('spinBtn').classList.add('hidden');
+      document.getElementById('scoreBox').classList.remove('hidden');
+      document.getElementById('scoreLabel').textContent = 'Final Score:';
+      document.getElementById('scoreNum').textContent = placed;
+      const msg = document.getElementById('message');
+      if (won) {
+        msg.textContent = 'You win! All 20 numbers placed!';
+        msg.className = 'message win';
+      } else {
+        msg.textContent = `Game over! No valid slot for ${currentNum}.`;
+        msg.className = 'message lose';
+      }
+      // Save to leaderboard
+      leaderboard.push({ name: currentPlayer, score: placed });
+      leaderboard.sort((a, b) => b.score - a.score);
+      localStorage.setItem('twentyNumbers_leaderboard', JSON.stringify(leaderboard));
+      renderLeaderboard(currentPlayer);
+      document.getElementById('restartBtn').classList.remove('hidden');
+      skyTarget = 1;
+      skySpeed = 0.005;
+    }
+
+    let editMode = false;
+    let undoStack = [];
+
+    function pushUndo() {
+      undoStack.push(JSON.stringify(leaderboard));
+      document.getElementById('undoLbBtn').classList.remove('hidden');
+    }
+
+    function toggleEditMode() {
+      editMode = !editMode;
+      document.getElementById('editLbBtn').textContent = editMode ? 'Done' : 'Edit';
+      document.getElementById('undoLbBtn').classList.toggle('hidden', !editMode || undoStack.length === 0);
+      document.getElementById('addLbBtn').classList.toggle('hidden', !editMode);
+      renderLeaderboard(editMode ? null : currentPlayer);
+    }
+
+    function deletePlayer(name) {
+      pushUndo();
+      leaderboard = leaderboard.filter(e => e.name !== name);
+      localStorage.setItem('twentyNumbers_leaderboard', JSON.stringify(leaderboard));
+      renderLeaderboard(null);
+    }
+
+    function saveScores(name, value) {
+      pushUndo();
+      const newScores = value.split(/[,\s]+/).map(Number).filter(n => !isNaN(n) && n > 0);
+      leaderboard = leaderboard.filter(e => e.name !== name);
+      for (const s of newScores) leaderboard.push({ name, score: s });
+      localStorage.setItem('twentyNumbers_leaderboard', JSON.stringify(leaderboard));
+      renderLeaderboard(null);
+    }
+
+    function saveName(oldName, newName) {
+      newName = newName.trim();
+      if (!newName || newName === oldName) return;
+      pushUndo();
+      for (const e of leaderboard) { if (e.name === oldName) e.name = newName; }
+      localStorage.setItem('twentyNumbers_leaderboard', JSON.stringify(leaderboard));
+      renderLeaderboard(null);
+    }
+
+    function addPlayer() {
+      pushUndo();
+      leaderboard.push({ name: 'New Player', score: 0 });
+      localStorage.setItem('twentyNumbers_leaderboard', JSON.stringify(leaderboard));
+      renderLeaderboard(null);
+    }
+
+    function undoLeaderboard() {
+      if (undoStack.length === 0) return;
+      leaderboard = JSON.parse(undoStack.pop());
+      localStorage.setItem('twentyNumbers_leaderboard', JSON.stringify(leaderboard));
+      if (undoStack.length === 0) document.getElementById('undoLbBtn').classList.add('hidden');
+      renderLeaderboard(null);
+    }
+
+    function formatHistory(scores, best) {
+      // Remove one instance of the best score (it's shown in its own column)
+      const rest = [...scores];
+      const bestIdx = rest.indexOf(best);
+      if (bestIdx !== -1) rest.splice(bestIdx, 1);
+      if (rest.length === 0) return '';
+      // Group remaining scores by value, sorted descending
+      const counts = {};
+      for (const s of rest) counts[s] = (counts[s] || 0) + 1;
+      const unique = Object.keys(counts).map(Number).sort((a, b) => b - a);
+      return unique.map(s => counts[s] > 1 ? `${s}x${counts[s]}` : `${s}`).join(',');
+    }
+
+    // Pixel-art trophy sprite (8x10)
+    const trophySprite = [
+      [0,0,0,0,0,0,0,0],
+      [0,1,0,0,0,0,1,0],
+      [0,1,1,1,1,1,1,0],
+      [0,1,1,1,1,1,1,0],
+      [0,0,1,1,1,1,0,0],
+      [0,0,0,1,1,0,0,0],
+      [0,0,0,1,1,0,0,0],
+      [0,0,1,1,1,1,0,0],
+      [0,0,1,1,1,1,0,0],
+      [0,0,0,0,0,0,0,0],
+    ];
+    const trophyColors = {
+      1: { body: '#FFD700', shade: '#DAA520' }, // gold
+      2: { body: '#C0C0C0', shade: '#909090' }, // silver
+      3: { body: '#CD7F32', shade: '#A0622E' }, // bronze
+    };
+    const trophyCache = {};
+    function getTrophyDataUrl(rank) {
+      if (trophyCache[rank]) return trophyCache[rank];
+      const c = document.createElement('canvas');
+      c.width = 8; c.height = 10;
+      const cx = c.getContext('2d');
+      const col = trophyColors[rank];
+      for (let y = 0; y < trophySprite.length; y++) {
+        for (let x = 0; x < trophySprite[y].length; x++) {
+          if (trophySprite[y][x]) {
+            // Use shade color for the left edge and bottom of cup for depth
+            cx.fillStyle = (x === 1 || y >= 7) ? col.shade : col.body;
+            cx.fillRect(x, y, 1, 1);
+          }
+        }
+      }
+      trophyCache[rank] = c.toDataURL();
+      return trophyCache[rank];
+    }
+
+    function renderLeaderboard(highlightName) {
+      // Aggregate by name
+      const byName = {};
+      for (const entry of leaderboard) {
+        if (!byName[entry.name]) byName[entry.name] = [];
+        byName[entry.name].push(entry.score);
+      }
+
+      // Build sorted player list by best score
+      const players = Object.keys(byName).map(name => {
+        const scores = byName[name];
+        const best = Math.max(...scores);
+        return { name, best, scores };
+      }).sort((a, b) => {
+        const as = a.scores.slice().sort((x, y) => y - x);
+        const bs = b.scores.slice().sort((x, y) => y - x);
+        for (let i = 0; i < Math.max(as.length, bs.length); i++) {
+          const diff = (bs[i] || 0) - (as[i] || 0);
+          if (diff !== 0) return diff;
+        }
+        return 0;
+      });
+
+      const list = document.getElementById('leaderboardList');
+      list.innerHTML = '';
+      players.forEach((p, i) => {
+        const row = document.createElement('div');
+        row.className = 'lb-row';
+        if (highlightName && p.name === highlightName) {
+          row.classList.add('highlight');
+        }
+        const hist = formatHistory(p.scores, p.best);
+        const delBtn = editMode ? `<span class="lb-del" onclick="deletePlayer('${p.name.replace(/'/g, "\\'")}')">X</span>` : '';
+        const rankHtml = (i < 3) ? `<img src="${getTrophyDataUrl(i + 1)}">` : (i === players.length - 1) ? '🤮' : `${i + 1}.`;
+        const safeName = p.name.replace(/'/g, "\\'");
+        const allScores = p.scores.sort((a, b) => b - a).join(', ');
+        const nameCol = editMode
+          ? `<input class="lb-edit-input lb-name-input" value="${p.name}" onblur="saveName('${safeName}', this.value)" onkeydown="if(event.key==='Enter')this.blur()">`
+          : `<span class="lb-name">${p.name}</span>`;
+        const scoreCols = editMode
+          ? `<input class="lb-edit-input lb-scores-input" value="${allScores}" onblur="saveScores('${safeName}', this.value)" onkeydown="if(event.key==='Enter')this.blur()">`
+          : `<span class="lb-best">${p.best}</span><span class="lb-hist">${hist}</span>`;
+        row.innerHTML = `<span class="lb-rank">${rankHtml}</span>${nameCol}${scoreCols}${delBtn}`;
+        list.appendChild(row);
+      });
+      // Measure widest name and apply uniform width for column alignment
+      const nameEls = list.querySelectorAll('.lb-name');
+      let maxW = 0;
+      nameEls.forEach(el => { if (el.offsetWidth > maxW) maxW = el.offsetWidth; });
+      nameEls.forEach(el => { el.style.width = maxW + 'px'; });
+    }
+
+    // ---- Sky & Pixel-art birds ----
+    const canvas = document.getElementById('birdCanvas');
+    const ctx = canvas.getContext('2d');
+    const birds = [];
+    // Sky phases: 0=day, 1=sunset, 2=night, 3=dawn, 4=day (wraps to 0)
+    let skyTime = 0;
+    let skyTarget = 0;
+    let skySpeed = 0.005;
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    const birdFrames = [
+      // wings up
+      [
+        [0,0,0,0,2,2,0,0,0],
+        [0,0,0,0,2,2,0,0,0],
+        [0,1,1,1,1,1,1,0,0],
+        [0,0,1,1,1,1,1,1,4],
+        [0,0,0,0,0,1,3,1,0],
+        [0,0,0,0,0,1,1,0,0],
+        [0,0,0,0,0,0,0,0,0],
+      ],
+      // wings mid
+      [
+        [0,0,0,0,0,0,0,0,0],
+        [0,0,0,0,0,0,0,0,0],
+        [0,1,1,2,2,1,1,0,0],
+        [0,0,1,1,1,1,1,1,4],
+        [0,0,0,0,0,1,3,1,0],
+        [0,0,0,0,0,1,1,0,0],
+        [0,0,0,0,0,0,0,0,0],
+      ],
+      // wings down
+      [
+        [0,0,0,0,0,0,0,0,0],
+        [0,0,0,0,0,0,0,0,0],
+        [0,1,1,1,1,1,1,0,0],
+        [0,0,1,1,1,1,1,1,4],
+        [0,0,0,0,2,1,3,1,0],
+        [0,0,0,0,2,1,1,0,0],
+        [0,0,0,0,2,2,0,0,0],
+      ],
+    ];
+
+    // ---- Pixel-art clouds ----
+    const cloudSprites = [
+      // Small puffy cloud
+      [
+        [0,0,0,1,1,1,0,0,0,0,0],
+        [0,0,1,1,1,1,1,0,0,0,0],
+        [0,1,1,1,1,1,1,1,1,0,0],
+        [1,1,1,1,1,1,1,1,1,1,0],
+        [0,1,1,1,1,1,1,1,1,0,0],
+      ],
+      // Wide flat cloud
+      [
+        [0,0,0,0,1,1,1,0,0,0,0,0,0,0],
+        [0,0,1,1,1,1,1,1,1,0,0,0,0,0],
+        [0,1,1,1,1,1,1,1,1,1,1,1,0,0],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,0],
+        [0,1,1,1,1,1,1,1,1,1,1,1,0,0],
+      ],
+      // Big fluffy cloud
+      [
+        [0,0,0,0,1,1,0,0,0,0,0,0,0],
+        [0,0,0,1,1,1,1,0,1,1,0,0,0],
+        [0,0,1,1,1,1,1,1,1,1,1,0,0],
+        [0,1,1,1,1,1,1,1,1,1,1,1,0],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [0,1,1,1,1,1,1,1,1,1,1,1,0],
+      ],
+    ];
+
+    const clouds = [];
+    function spawnClouds() {
+      for (let i = 0; i < 5; i++) {
+        clouds.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height * 0.35 + 20,
+          vx: 0.15 + Math.random() * 0.3,
+          sprite: cloudSprites[Math.floor(Math.random() * cloudSprites.length)],
+          scale: 8 + Math.floor(Math.random() * 6),
+          opacity: 0.25 + Math.random() * 0.25,
+        });
+      }
+    }
+    spawnClouds();
+
+    function drawCloud(cloud) {
+      const sp = cloud.sprite;
+      const px = cloud.scale;
+      ctx.globalAlpha = cloud.opacity;
+      ctx.fillStyle = '#fff';
+      for (let r = 0; r < sp.length; r++) {
+        for (let c = 0; c < sp[r].length; c++) {
+          if (sp[r][c]) {
+            ctx.fillRect(cloud.x + c * px, cloud.y + r * px, px, px);
+          }
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    function updateClouds() {
+      for (const c of clouds) {
+        c.x += c.vx;
+        const w = c.sprite[0].length * c.scale;
+        if (c.x > canvas.width + 20) {
+          c.x = -w - 10;
+          c.y = Math.random() * canvas.height * 0.35 + 20;
+        }
+      }
+    }
+
+    function randomBirdColor() {
+      const hue = Math.random() * 360;
+      return {
+        body: `hsl(${hue}, 70%, 55%)`,
+        wing: `hsl(${hue}, 60%, 40%)`,
+        eye: '#111',
+        beak: `hsl(${(hue + 30) % 360}, 80%, 65%)`,
+      };
+    }
+
+    function spawnBird() {
+      const goingRight = Math.random() > 0.5;
+      birds.push({
+        x: goingRight ? -40 : canvas.width + 40,
+        y: Math.random() * canvas.height * 0.7 + 20,
+        vx: (goingRight ? 1 : -1) * (1 + Math.random() * 1.5),
+        vy: 0,
+        frame: 0,
+        frameTick: 0,
+        color: randomBirdColor(),
+        dir: goingRight ? 1 : -1,
+        wobble: Math.random() * Math.PI * 2,
+        scale: 3 + Math.floor(Math.random() * 2),
+      });
+    }
+
+    function drawBird(bird) {
+      const frame = birdFrames[bird.frame];
+      const px = bird.scale;
+      const cols = frame[0].length;
+
+      ctx.save();
+      if (bird.dir < 0) {
+        ctx.translate(bird.x + cols * px, bird.y);
+        ctx.scale(-1, 1);
+      } else {
+        ctx.translate(bird.x, bird.y);
+      }
+
+      for (let r = 0; r < frame.length; r++) {
+        for (let c = 0; c < cols; c++) {
+          const val = frame[r][c];
+          if (val === 0) continue;
+          if (val === 1) ctx.fillStyle = bird.color.body;
+          else if (val === 2) ctx.fillStyle = bird.color.wing;
+          else if (val === 3) ctx.fillStyle = bird.color.eye;
+          else if (val === 4) ctx.fillStyle = bird.color.beak;
+          ctx.fillRect(c * px, r * px, px, px);
+        }
+      }
+      ctx.restore();
+    }
+
+    function lerpColor(c1, c2, t) {
+      return [
+        Math.round(c1[0] + (c2[0] - c1[0]) * t),
+        Math.round(c1[1] + (c2[1] - c1[1]) * t),
+        Math.round(c1[2] + (c2[2] - c1[2]) * t),
+      ];
+    }
+
+    // Sky color keyframes: [top, mid, bottom] at each phase
+    const skyColors = {
+      //           top             mid              bottom
+      day:    { top:[74,144,217],  mid:[135,206,235], bot:[173,216,255] },
+      sunset: { top:[27,20,100],   mid:[233,69,96],   bot:[255,154,60]  },
+      night:  { top:[8,8,30],      mid:[15,15,50],    bot:[20,20,60]    },
+      dawn:   { top:[40,30,80],    mid:[180,100,140], bot:[255,180,120] },
+    };
+    const skyPhases = ['day','sunset','night','dawn'];
+
+    function getSkyColorsAt(t) {
+      // t goes 0->4, wrapping. Each integer is a keyframe.
+      const i = Math.floor(t) % 4;
+      const j = (i + 1) % 4;
+      const frac = t - Math.floor(t);
+      const a = skyColors[skyPhases[i]];
+      const b = skyColors[skyPhases[j]];
+      return {
+        top: lerpColor(a.top, b.top, frac),
+        mid: lerpColor(a.mid, b.mid, frac),
+        bot: lerpColor(a.bot, b.bot, frac),
+      };
+    }
+
+    // Sun/moon keyframes: [y fraction (0=top,1=bottom), radius, r,g,b, opacity]
+    const sunKeyframes = [
+      { yFrac: 0.15, radius: 40, color: [255,236,100], opacity: 1 },   // day
+      { yFrac: 0.78, radius: 55, color: [255,80,30],   opacity: 1 },   // sunset
+      { yFrac: 1.1,  radius: 35, color: [200,200,255], opacity: 0 },   // night (below horizon)
+      { yFrac: 0.80, radius: 50, color: [255,180,80],  opacity: 0.8 }, // dawn
+    ];
+
+    function getSunAt(t) {
+      const i = Math.floor(t) % 4;
+      const j = (i + 1) % 4;
+      const frac = t - Math.floor(t);
+      const a = sunKeyframes[i], b = sunKeyframes[j];
+      return {
+        yFrac:   a.yFrac + (b.yFrac - a.yFrac) * frac,
+        radius:  a.radius + (b.radius - a.radius) * frac,
+        color:   lerpColor(a.color, b.color, frac),
+        opacity: a.opacity + (b.opacity - a.opacity) * frac,
+      };
+    }
+
+    function drawSky() {
+      const w = canvas.width, h = canvas.height;
+      const c = getSkyColorsAt(skyTime);
+
+      const grad = ctx.createLinearGradient(0, 0, 0, h);
+      grad.addColorStop(0, `rgb(${c.top[0]},${c.top[1]},${c.top[2]})`);
+      grad.addColorStop(0.6, `rgb(${c.mid[0]},${c.mid[1]},${c.mid[2]})`);
+      grad.addColorStop(1, `rgb(${c.bot[0]},${c.bot[1]},${c.bot[2]})`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, w, h);
+
+      // Stars at night
+      const nightness = Math.max(0, 1 - Math.abs(skyTime % 4 - 2));  // peaks at phase 2
+      if (nightness > 0.1) {
+        ctx.fillStyle = `rgba(255,255,255,${nightness * 0.8})`;
+        // Deterministic star positions
+        for (let s = 0; s < 60; s++) {
+          const sx = ((s * 7919 + 31) % 997) / 997 * w;
+          const sy = ((s * 6271 + 17) % 991) / 991 * h * 0.6;
+          const sr = ((s * 3) % 3 === 0) ? 2 : 1;
+          ctx.fillRect(sx, sy, sr, sr);
+        }
+      }
+
+      // Sun/moon
+      const sun = getSunAt(skyTime);
+      if (sun.opacity > 0.01 && sun.yFrac < 1.0) {
+        const sunX = w * 0.85;
+        const sunY = h * sun.yFrac;
+
+        // Glow
+        const glow = ctx.createRadialGradient(sunX, sunY, sun.radius * 0.3, sunX, sunY, sun.radius * 3);
+        glow.addColorStop(0, `rgba(${sun.color[0]},${sun.color[1]},${sun.color[2]},${sun.opacity * 0.4})`);
+        glow.addColorStop(1, `rgba(${sun.color[0]},${sun.color[1]},${sun.color[2]},0)`);
+        ctx.fillStyle = glow;
+        ctx.fillRect(0, 0, w, h);
+
+        // Disc
+        ctx.globalAlpha = sun.opacity;
+        ctx.fillStyle = `rgb(${sun.color[0]},${sun.color[1]},${sun.color[2]})`;
+        ctx.beginPath();
+        ctx.arc(sunX, sunY, sun.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
+      // Moon during night
+      if (nightness > 0.1) {
+        const moonX = w * 0.2;
+        const moonY = h * 0.18;
+        ctx.globalAlpha = nightness;
+        ctx.fillStyle = '#e8e8f0';
+        ctx.beginPath();
+        ctx.arc(moonX, moonY, 25, 0, Math.PI * 2);
+        ctx.fill();
+        // Crescent shadow
+        ctx.fillStyle = `rgb(${Math.round(8 + (1-nightness)*60)},${Math.round(8 + (1-nightness)*60)},${Math.round(30 + (1-nightness)*60)})`;
+        ctx.beginPath();
+        ctx.arc(moonX + 10, moonY - 3, 22, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // --- Lightning ---
+    let lightningBolts = [];
+    let screenFlash = 0;
+    let stormDarkness = 0;
+
+    function spawnOneBolt(x, targetX, targetY) {
+      const endY = targetY != null ? targetY : canvas.height * 0.75;
+      const segments = 8 + Math.floor(Math.random() * 6);
+      const segHeight = endY / segments;
+      let curX = x, curY = 0;
+      const points = [{x: curX, y: curY}];
+      for (let i = 0; i < segments; i++) {
+        // On the last segment, steer toward target if given
+        if (targetX != null && i === segments - 1) {
+          curX = targetX + (Math.random() - 0.5) * 10;
+        } else {
+          curX += (Math.random() - 0.5) * 140;
+        }
+        curY += segHeight + Math.random() * 20;
+        points.push({x: curX, y: curY});
+        if (Math.random() < 0.5) {
+          const branchPts = [{x: curX, y: curY}];
+          let bx = curX, by = curY;
+          const bLen = 2 + Math.floor(Math.random() * 4);
+          for (let j = 0; j < bLen; j++) {
+            bx += (Math.random() - 0.5) * 100;
+            by += segHeight * 0.5;
+            branchPts.push({x: bx, y: by});
+          }
+          lightningBolts.push({points: branchPts, alpha: 1, width: 1.5});
+        }
+      }
+      lightningBolts.push({points, alpha: 1, width: 4});
+    }
+
+    function spawnLightning() {
+      screenFlash = 0.5;
+      stormDarkness = Math.min(stormDarkness + 0.6, 0.75);
+
+      // Strike all living birds
+      const aliveBirds = birds.filter(b => !b.falling);
+      for (const bird of aliveBirds) {
+        bird.falling = true;
+        bird.fallVx = (Math.random() - 0.5) * 2;
+        bird.fallVy = 0;
+        bird.rotation = 0;
+        bird.rotSpeed = (Math.random() > 0.5 ? 1 : -1) * (0.05 + Math.random() * 0.08);
+        spawnOneBolt(bird.x + (Math.random() - 0.5) * 80, bird.x, bird.y);
+      }
+
+      // Spawn a couple extra ambient bolts
+      const extra = 1 + Math.floor(Math.random() * 2);
+      for (let i = 0; i < extra; i++) {
+        const x = canvas.width * (0.15 + Math.random() * 0.7);
+        spawnOneBolt(x);
+      }
+    }
+
+    function drawLightning() {
+      // Storm darkness overlay (drawn before bolts so they punch through)
+      if (stormDarkness > 0) {
+        ctx.fillStyle = `rgba(10, 10, 30, ${stormDarkness})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        stormDarkness = Math.max(0, stormDarkness - 0.004);
+      }
+
+      for (let i = lightningBolts.length - 1; i >= 0; i--) {
+        const bolt = lightningBolts[i];
+        bolt.alpha -= 0.018;
+        if (bolt.alpha <= 0) { lightningBolts.splice(i, 1); continue; }
+        // Outer glow
+        ctx.strokeStyle = `rgba(140, 140, 255, ${bolt.alpha * 0.25})`;
+        ctx.lineWidth = bolt.width + 18;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(bolt.points[0].x, bolt.points[0].y);
+        for (let j = 1; j < bolt.points.length; j++) ctx.lineTo(bolt.points[j].x, bolt.points[j].y);
+        ctx.stroke();
+        // Inner glow
+        ctx.strokeStyle = `rgba(180, 180, 255, ${bolt.alpha * 0.5})`;
+        ctx.lineWidth = bolt.width + 8;
+        ctx.beginPath();
+        ctx.moveTo(bolt.points[0].x, bolt.points[0].y);
+        for (let j = 1; j < bolt.points.length; j++) ctx.lineTo(bolt.points[j].x, bolt.points[j].y);
+        ctx.stroke();
+        // Core
+        ctx.strokeStyle = `rgba(255, 255, 255, ${bolt.alpha})`;
+        ctx.lineWidth = bolt.width;
+        ctx.beginPath();
+        ctx.moveTo(bolt.points[0].x, bolt.points[0].y);
+        for (let j = 1; j < bolt.points.length; j++) ctx.lineTo(bolt.points[j].x, bolt.points[j].y);
+        ctx.stroke();
+        ctx.lineCap = 'butt';
+        ctx.lineJoin = 'miter';
+      }
+      // Screen flash
+      if (screenFlash > 0) {
+        ctx.fillStyle = `rgba(255, 255, 255, ${screenFlash})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        screenFlash -= 0.015;
+      }
+    }
+
+    function animateBirds() {
+      // Transition sky toward target
+      if (skyTime < skyTarget) {
+        skyTime = Math.min(skyTime + skySpeed, skyTarget);
+        // Once we reach 4 (full cycle), reset to 0
+        if (skyTime >= 4) {
+          skyTime = 0;
+          skyTarget = 0;
+        }
+      }
+
+      drawSky();
+      updateClouds();
+      for (const c of clouds) drawCloud(c);
+
+      for (let i = birds.length - 1; i >= 0; i--) {
+        const b = birds[i];
+
+        if (b.falling) {
+          // Gravity and tumble
+          b.fallVy += 0.3;
+          b.x += b.fallVx;
+          b.y += b.fallVy;
+          b.rotation += b.rotSpeed;
+          b.frame = 2; // wings down
+
+          // Remove when off the bottom
+          if (b.y > canvas.height + 40) {
+            birds.splice(i, 1);
+            continue;
+          }
+
+          // Draw with rotation
+          ctx.save();
+          const px = b.scale;
+          const cols = birdFrames[0][0].length;
+          const rows = birdFrames[0].length;
+          const cx = b.x + (cols * px) / 2;
+          const cy = b.y + (rows * px) / 2;
+          ctx.translate(cx, cy);
+          ctx.rotate(b.rotation);
+          ctx.translate(-cx, -cy);
+          drawBird(b);
+          ctx.restore();
+        } else {
+          b.wobble += 0.03;
+          b.vy = Math.sin(b.wobble) * 0.5;
+          b.x += b.vx;
+          b.y += b.vy;
+
+          b.frameTick++;
+          if (b.frameTick > 8) {
+            b.frameTick = 0;
+            b.frame = (b.frame + 1) % birdFrames.length;
+          }
+
+          // Wrap around screen
+          if (b.dir > 0 && b.x > canvas.width + 60) {
+            b.x = -50;
+            b.y = Math.random() * canvas.height * 0.7 + 20;
+          } else if (b.dir < 0 && b.x < -60) {
+            b.x = canvas.width + 50;
+            b.y = Math.random() * canvas.height * 0.7 + 20;
+          }
+
+          drawBird(b);
+        }
+      }
+
+      drawLightning();
+      requestAnimationFrame(animateBirds);
+    }
+
+    renderLeaderboard(null);
+    animateBirds();
+  </script>
+</body>
+</html>
