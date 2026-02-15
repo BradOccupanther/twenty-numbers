@@ -280,7 +280,7 @@
       border-radius: 12px;
       padding: 20px 28px;
       text-align: center;
-      min-width: 240px;
+      min-width: 320px;
     }
 
     .overlay-title {
@@ -322,6 +322,102 @@
       background: #45b85a;
     }
 
+    .player-list {
+      margin-bottom: 12px;
+      max-height: 70vh;
+      overflow-y: auto;
+    }
+
+    .player-group-header {
+      font-size: 0.85rem;
+      font-weight: bold;
+      color: #aaa;
+      padding: 6px 12px 4px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .player-group-header:hover {
+      color: #fff;
+    }
+
+    .player-group-header .toggle-arrow {
+      display: inline-block;
+      margin-right: 4px;
+      transition: transform 0.15s;
+    }
+
+    .player-group-header .toggle-arrow.collapsed {
+      transform: rotate(-90deg);
+    }
+
+    .player-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+
+    .player-row:nth-child(odd) {
+      background: rgba(255,255,255,0.04);
+    }
+
+    .player-row:hover {
+      background: rgba(83, 215, 105, 0.2);
+    }
+
+    .player-row .player-name {
+      color: #fff;
+      font-weight: bold;
+      font-size: 0.95rem;
+    }
+
+    .player-row .player-date {
+      color: #888;
+      font-size: 0.8rem;
+      margin-left: 16px;
+      white-space: nowrap;
+    }
+
+    .add-player-section {
+      border-top: 1px solid #0f3460;
+      padding-top: 10px;
+      margin-top: 4px;
+    }
+
+    .add-player-section button {
+      width: 100%;
+    }
+
+    .add-player-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .add-player-row input {
+      flex: 1;
+      margin-bottom: 0;
+    }
+
+    .add-player-row button {
+      width: auto;
+      padding: 8px 16px;
+    }
+
+    .add-player-type {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .add-player-type button {
+      flex: 1;
+    }
+
     .lb-row {
       display: flex;
       padding: 3px 6px;
@@ -356,7 +452,11 @@
     }
     .lb-edit-input:focus { border-color: #53d769; }
     .lb-name-input { width: 130px; margin-right: 8px; }
-    .lb-scores-input { flex: 1; }
+    .lb-scores-input { flex: 1; margin-right: 8px; }
+    .lb-date-input { width: 90px; margin-right: 8px; }
+    .lb-date { color: #888; font-size: 0.75rem; margin-left: 6px; white-space: nowrap; }
+    .lb-fa { display: flex; align-items: center; gap: 3px; font-size: 0.7rem; color: #aaa; white-space: nowrap; margin-right: 6px; }
+    .lb-fa input { margin: 0; cursor: pointer; }
     .lb-del {
       color: #e94560;
       cursor: pointer;
@@ -468,9 +568,20 @@
 
   <div id="nameOverlay" class="overlay">
     <div class="overlay-box">
-      <div class="overlay-title">Enter Your Name</div>
-      <input type="text" id="nameInput" maxlength="20" placeholder="Name..." autofocus>
-      <button id="nameBtn" onclick="submitName()">Play</button>
+      <div class="overlay-title">Select Player</div>
+      <div class="player-list" id="playerList"></div>
+      <div class="add-player-section">
+        <button id="addPlayerBtn" onclick="toggleAddPlayer()">+ New Player</button>
+        <div class="hidden" id="addPlayerRow">
+          <div class="add-player-row">
+            <input type="text" id="newPlayerInput" maxlength="20" placeholder="Name...">
+          </div>
+          <div class="add-player-type">
+            <button onclick="confirmNewPlayer(true)">FA Member</button>
+            <button onclick="confirmNewPlayer(false)">Visitor</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -593,11 +704,45 @@
     });
     const db = firebase.database();
     const lbRef = db.ref('leaderboard');
+    const lpRef = db.ref('lastPlayed');
+    const faRef = db.ref('faMembers');
+    const bcRef = db.ref('birdCount');
 
     let leaderboard = [];
+    let lastPlayed = {};
+    let faMembers = new Set();
+
+    const defaultFaMembers = [
+      'Olivia M Lee', 'Kristine Lin', 'Rachel Liu', 'Brad Munsterteiger',
+      'Zeb Taylor', 'Rupin Sharma', 'Matt Koutsoutis', 'Matthew Duthaler',
+      'Thomas Gray', 'Greg Edwards', 'Alejandro Hernandez', 'Andrew W Lee',
+      'Hassan Nejmeldeen',
+    ];
+
+    const defaultLastPlayed = {
+      'Thomas Gray': '2026-01-09',
+      'Rupin Sharma': '2026-01-06',
+      'Greg Edwards': '2026-01-10',
+      'Zeb Taylor': '2026-01-05',
+      'Andrew W Lee': '2026-01-12',
+      'Matt Koutsoutis': '2026-01-07',
+      'Brad Munsterteiger': '2026-01-04',
+      'Alejandro Hernandez': '2026-01-11',
+      'Rachel Liu': '2026-01-03',
+      'Olivia M Lee': '2026-01-01',
+      'Kristine Lin': '2026-01-02',
+      'Hassan Nejmeldeen': '2026-01-13',
+      'Matthew Duthaler': '2026-01-08',
+    };
 
     function saveLeaderboard() {
       lbRef.set(leaderboard);
+    }
+
+    function refreshPlayerListIfVisible() {
+      if (!document.getElementById('nameOverlay').classList.contains('hidden')) {
+        showNamePrompt();
+      }
     }
 
     // Realtime listener - syncs leaderboard across all clients
@@ -606,34 +751,176 @@
       if (data) {
         leaderboard = data;
       } else {
-        // First ever load - seed with defaults
         leaderboard = defaultLeaderboard;
         saveLeaderboard();
       }
       renderLeaderboard(currentPlayer);
+      refreshPlayerListIfVisible();
+    });
+
+    // Last-played listener
+    lpRef.on('value', (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        lastPlayed = data;
+      } else {
+        lastPlayed = defaultLastPlayed;
+        lpRef.set(lastPlayed);
+      }
+      refreshPlayerListIfVisible();
+    });
+
+    // FA members listener
+    faRef.on('value', (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        faMembers = new Set(data);
+      } else {
+        faMembers = new Set(defaultFaMembers);
+        faRef.set(defaultFaMembers);
+      }
+      refreshPlayerListIfVisible();
+    });
+
+    // Bird count listener - sync visual birds to match Firebase count
+    let syncedBirdCount = 0;
+    bcRef.on('value', (snapshot) => {
+      const count = snapshot.val() || 0;
+      syncedBirdCount = count;
+      // Adjust visual birds to match
+      const aliveBirds = birds.filter(b => !b.falling);
+      if (aliveBirds.length < count) {
+        for (let i = aliveBirds.length; i < count; i++) spawnBird();
+      } else if (aliveBirds.length > count) {
+        // Remove excess birds (without animation)
+        let toRemove = aliveBirds.length - count;
+        for (let i = birds.length - 1; i >= 0 && toRemove > 0; i--) {
+          if (!birds[i].falling) {
+            birds.splice(i, 1);
+            toRemove--;
+          }
+        }
+      }
     });
 
     function randInt(min, max) {
       return Math.floor(Math.random() * (max - min + 1)) + min;
     }
 
-    function submitName() {
-      const name = document.getElementById('nameInput').value.trim();
-      if (!name) return;
+    function formatDate(isoStr) {
+      if (!isoStr) return 'Unknown';
+      const d = new Date(isoStr + 'T00:00:00');
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return months[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
+    }
+
+    function selectPlayer(name) {
       currentPlayer = name;
       document.getElementById('nameOverlay').classList.add('hidden');
       startGame();
     }
 
-    document.getElementById('nameInput').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') submitName();
-    });
+    function toggleAddPlayer() {
+      const row = document.getElementById('addPlayerRow');
+      const btn = document.getElementById('addPlayerBtn');
+      const showing = !row.classList.contains('hidden');
+      row.classList.toggle('hidden');
+      btn.classList.toggle('hidden');
+      if (!showing) {
+        document.getElementById('newPlayerInput').focus();
+      }
+    }
+
+    function confirmNewPlayer(isFa) {
+      const name = document.getElementById('newPlayerInput').value.trim();
+      if (!name) return;
+      if (isFa) {
+        faMembers.add(name);
+        faRef.set([...faMembers]);
+      }
+      document.getElementById('newPlayerInput').value = '';
+      document.getElementById('addPlayerRow').classList.add('hidden');
+      document.getElementById('addPlayerBtn').classList.remove('hidden');
+      selectPlayer(name);
+    }
+
+    function sortPlayers(names) {
+      return names.sort((a, b) => {
+        const da = lastPlayed[a];
+        const db_ = lastPlayed[b];
+        if (da && db_) return da > db_ ? 1 : da < db_ ? -1 : 0;
+        if (da && !db_) return -1;
+        if (!da && db_) return 1;
+        return a.localeCompare(b);
+      });
+    }
+
+    let faCollapsed = false;
+    let visitorsCollapsed = true;
+
+    function buildPlayerRows(names, container) {
+      for (const name of names) {
+        const row = document.createElement('div');
+        row.className = 'player-row';
+        const date = lastPlayed[name];
+        row.innerHTML = `<span class="player-name">${name}</span><span class="player-date">${formatDate(date)}</span>`;
+        row.addEventListener('click', () => selectPlayer(name));
+        container.appendChild(row);
+      }
+    }
 
     function showNamePrompt() {
+      const list = document.getElementById('playerList');
+      list.innerHTML = '';
+
+      // Get unique names from leaderboard
+      const allNames = new Set();
+      for (const entry of leaderboard) allNames.add(entry.name);
+
+      const fa = sortPlayers([...allNames].filter(n => faMembers.has(n)));
+      const visitors = sortPlayers([...allNames].filter(n => !faMembers.has(n)));
+
+      // FA Members group (collapsible, starts expanded)
+      if (fa.length > 0) {
+        const faHeader = document.createElement('div');
+        faHeader.className = 'player-group-header';
+        faHeader.innerHTML = `<span class="toggle-arrow ${faCollapsed ? 'collapsed' : ''}">▼</span> FA Members`;
+        list.appendChild(faHeader);
+        const faContainer = document.createElement('div');
+        if (faCollapsed) faContainer.style.display = 'none';
+        buildPlayerRows(fa, faContainer);
+        list.appendChild(faContainer);
+
+        faHeader.addEventListener('click', () => {
+          faCollapsed = !faCollapsed;
+          faContainer.style.display = faCollapsed ? 'none' : '';
+          faHeader.querySelector('.toggle-arrow').classList.toggle('collapsed', faCollapsed);
+        });
+      }
+
+      // Visitors group (collapsible)
+      if (visitors.length > 0) {
+        const vHeader = document.createElement('div');
+        vHeader.className = 'player-group-header';
+        vHeader.innerHTML = `<span class="toggle-arrow ${visitorsCollapsed ? 'collapsed' : ''}">▼</span> Visitors`;
+        list.appendChild(vHeader);
+        const vContainer = document.createElement('div');
+        if (visitorsCollapsed) vContainer.style.display = 'none';
+        buildPlayerRows(visitors, vContainer);
+        list.appendChild(vContainer);
+
+        vHeader.addEventListener('click', () => {
+          visitorsCollapsed = !visitorsCollapsed;
+          vContainer.style.display = visitorsCollapsed ? 'none' : '';
+          vHeader.querySelector('.toggle-arrow').classList.toggle('collapsed', visitorsCollapsed);
+        });
+      }
+
+      // Reset add-player section
+      document.getElementById('addPlayerRow').classList.add('hidden');
+      document.getElementById('addPlayerBtn').classList.remove('hidden');
+      document.getElementById('newPlayerInput').value = '';
       document.getElementById('nameOverlay').classList.remove('hidden');
-      document.getElementById('nameInput').value = currentPlayer;
-      document.getElementById('nameInput').focus();
-      document.getElementById('nameInput').select();
     }
 
     let spinning = false;
@@ -919,7 +1206,7 @@
         }
         if (chosenScore < bestScore) {
           wasSuboptimal = true;
-          spawnLightning();
+          spawnLightning((placed + 1) * 2);
           hintBox.innerHTML =
             `<div class="hint-title">Better move was <span class="hint-best">Slot #${bestSlot + 1}</span></div>`;
           hintBox.classList.remove('hidden');
@@ -935,7 +1222,7 @@
       placed++;
       document.getElementById('scoreNum').textContent = placed;
       if (!wasSuboptimal) {
-        for (let i = 0; i < placed; i++) spawnBird();
+        bcRef.set(syncedBirdCount + placed);
       }
 
       if (placed === SLOTS) {
@@ -971,6 +1258,10 @@
       leaderboard.push({ name: currentPlayer, score: placed });
       leaderboard.sort((a, b) => b.score - a.score);
       saveLeaderboard();
+      // Update last played date
+      const today = new Date().toISOString().split('T')[0];
+      lastPlayed[currentPlayer] = today;
+      lpRef.set(lastPlayed);
       renderLeaderboard(currentPlayer);
       document.getElementById('restartBtn').classList.remove('hidden');
       skyTarget = 1;
@@ -1014,8 +1305,38 @@
       if (!newName || newName === oldName) return;
       pushUndo();
       for (const e of leaderboard) { if (e.name === oldName) e.name = newName; }
+      // Move lastPlayed entry to new name
+      if (lastPlayed[oldName]) {
+        lastPlayed[newName] = lastPlayed[oldName];
+        delete lastPlayed[oldName];
+        lpRef.set(lastPlayed);
+      }
       saveLeaderboard();
       renderLeaderboard(null);
+    }
+
+    function savePlayerDate(name, value) {
+      value = value.trim();
+      if (!value || value.toLowerCase() === 'unknown') {
+        delete lastPlayed[name];
+      } else {
+        // Try to parse as a date
+        const d = new Date(value);
+        if (!isNaN(d.getTime())) {
+          lastPlayed[name] = d.toISOString().split('T')[0];
+        }
+      }
+      lpRef.set(lastPlayed);
+      renderLeaderboard(null);
+    }
+
+    function toggleFa(name, checked) {
+      if (checked) {
+        faMembers.add(name);
+      } else {
+        faMembers.delete(name);
+      }
+      faRef.set([...faMembers]);
     }
 
     function addPlayer() {
@@ -1123,10 +1444,18 @@
         const nameCol = editMode
           ? `<input class="lb-edit-input lb-name-input" value="${p.name}" onblur="saveName('${safeName}', this.value)" onkeydown="if(event.key==='Enter')this.blur()">`
           : `<span class="lb-name">${p.name}</span>`;
+        const dateVal = lastPlayed[p.name] || '';
+        const dateDisplay = formatDate(lastPlayed[p.name]);
         const scoreCols = editMode
           ? `<input class="lb-edit-input lb-scores-input" value="${allScores}" onblur="saveScores('${safeName}', this.value)" onkeydown="if(event.key==='Enter')this.blur()">`
           : `<span class="lb-best">${p.best}</span><span class="lb-hist">${hist}</span>`;
-        row.innerHTML = `<span class="lb-rank">${rankHtml}</span>${nameCol}${scoreCols}${delBtn}`;
+        const dateCol = editMode
+          ? `<input class="lb-edit-input lb-date-input" value="${dateVal}" placeholder="YYYY-MM-DD" onblur="savePlayerDate('${safeName}', this.value)" onkeydown="if(event.key==='Enter')this.blur()">`
+          : '';
+        const faCol = editMode
+          ? `<label class="lb-fa"><input type="checkbox" ${faMembers.has(p.name) ? 'checked' : ''} onchange="toggleFa('${safeName}', this.checked)">FA</label>`
+          : '';
+        row.innerHTML = `<span class="lb-rank">${rankHtml}</span>${nameCol}${scoreCols}${dateCol}${faCol}${delBtn}`;
         list.appendChild(row);
       });
       // Measure widest name and apply uniform width for column alignment
@@ -1460,19 +1789,24 @@
       lightningBolts.push({points, alpha: 1, width: 4});
     }
 
-    function spawnLightning() {
+    function spawnLightning(killCount) {
       screenFlash = 0.5;
       stormDarkness = Math.min(stormDarkness + 0.6, 0.75);
 
-      // Strike all living birds
+      // Strike up to killCount living birds
       const aliveBirds = birds.filter(b => !b.falling);
-      for (const bird of aliveBirds) {
+      const toKill = Math.min(killCount, aliveBirds.length);
+      for (let i = 0; i < toKill; i++) {
+        const bird = aliveBirds[i];
         bird.falling = true;
         bird.fallVx = (Math.random() - 0.5) * 2;
         bird.fallVy = 0;
         bird.rotation = 0;
         bird.rotSpeed = (Math.random() > 0.5 ? 1 : -1) * (0.05 + Math.random() * 0.08);
         spawnOneBolt(bird.x + (Math.random() - 0.5) * 80, bird.x, bird.y);
+      }
+      if (toKill > 0) {
+        bcRef.set(Math.max(0, syncedBirdCount - toKill));
       }
 
       // Spawn a couple extra ambient bolts
