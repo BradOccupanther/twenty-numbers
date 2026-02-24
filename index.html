@@ -566,7 +566,20 @@
 <body>
   <canvas id="birdCanvas"></canvas>
 
-  <div id="nameOverlay" class="overlay">
+  <div id="modeOverlay" class="overlay">
+    <div class="overlay-box">
+      <div class="overlay-title">Choose Mode</div>
+      <button onclick="selectMode('ranked')" style="width:100%;padding:18px 10px;margin:8px 0;font-size:1.1rem;font-weight:bold;border:none;border-radius:8px;color:#fff;cursor:pointer;background:linear-gradient(135deg,#e53935,#d81b60);">
+        Ranked
+        <div style="font-size:0.75rem;font-weight:normal;margin-top:4px;opacity:0.85;">Procedural &amp; Core Clinical FA Meeting Only</div>
+      </button>
+      <button onclick="selectMode('casual')" style="width:100%;padding:18px 10px;margin:8px 0;font-size:1.1rem;font-weight:bold;border:none;border-radius:8px;color:#fff;cursor:pointer;background:linear-gradient(135deg,#43a047,#2e7d32);">
+        Casual
+      </button>
+    </div>
+  </div>
+
+  <div id="nameOverlay" class="overlay hidden">
     <div class="overlay-box">
       <div class="overlay-title">Select Player</div>
       <div class="player-list" id="playerList"></div>
@@ -619,8 +632,10 @@
     </div>
 
     <div class="message" id="message"></div>
-    <button class="restart hidden" id="restartBtn" onclick="showNamePrompt()">Play Again</button>
+    <button class="restart hidden" id="restartBtn" onclick="handleRestart()">Play Again</button>
   </div>
+
+  <button id="changeModeBtn" onclick="showModeSelection()" style="position:fixed;bottom:12px;right:12px;z-index:11;padding:6px 14px;font-size:0.8rem;background:rgba(22,33,62,0.85);color:#aab;border:1px solid #0f3460;border-radius:6px;cursor:pointer;">Change Mode</button>
 
   <script>
     const SLOTS = 20;
@@ -632,6 +647,7 @@
     let gameOver;
     let placed;
     let currentPlayer = '';
+    let gameMode = '';
     const defaultLeaderboard = [
       // Katie Newman: 17 (15,12,10)
       {name:'Katie Newman',score:17},{name:'Katie Newman',score:15},{name:'Katie Newman',score:12},{name:'Katie Newman',score:10},
@@ -785,6 +801,7 @@
     // Bird count listener - sync visual birds to match Firebase count
     let syncedBirdCount = 0;
     bcRef.on('value', (snapshot) => {
+      if (gameMode === 'casual') return;
       const count = snapshot.val() || 0;
       syncedBirdCount = count;
       // Adjust visual birds to match
@@ -812,6 +829,62 @@
       const d = new Date(isoStr + 'T00:00:00');
       const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
       return months[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
+    }
+
+    function selectMode(mode) {
+      gameMode = mode;
+      if (mode === 'ranked') {
+        const pw = prompt('Enter password for Ranked mode:');
+        if (!pw || pw.toLowerCase() !== 'password') {
+          gameMode = '';
+          return;
+        }
+      }
+      document.getElementById('modeOverlay').classList.add('hidden');
+      if (mode === 'ranked') {
+        document.querySelector('.leaderboard-panel').style.display = '';
+        document.querySelector('.bird-counter').style.display = '';
+        // Re-render leaderboard now that panel is visible (fixes name column widths)
+        renderLeaderboard(currentPlayer);
+        // Re-sync birds from Firebase (casual may have dirtied syncedBirdCount)
+        bcRef.once('value', (snapshot) => {
+          const count = snapshot.val() || 0;
+          syncedBirdCount = count;
+          const aliveBirds = birds.filter(b => !b.falling);
+          if (aliveBirds.length < count) {
+            for (let i = aliveBirds.length; i < count; i++) spawnBird();
+          } else if (aliveBirds.length > count) {
+            let toRemove = aliveBirds.length - count;
+            for (let i = birds.length - 1; i >= 0 && toRemove > 0; i--) {
+              if (!birds[i].falling) { birds.splice(i, 1); toRemove--; }
+            }
+          }
+        });
+        showNamePrompt();
+      } else {
+        currentPlayer = 'Casual';
+        document.querySelector('.leaderboard-panel').style.display = 'none';
+        document.querySelector('.bird-counter').style.display = '';
+        // Reset birds locally for casual
+        syncedBirdCount = 0;
+        birds.length = 0;
+        startGame();
+      }
+    }
+
+    function handleRestart() {
+      if (gameMode === 'casual') {
+        startGame();
+      } else {
+        showNamePrompt();
+      }
+    }
+
+    function showModeSelection() {
+      // Reset game state
+      gameOver = true;
+      document.getElementById('modeOverlay').classList.remove('hidden');
+      document.getElementById('nameOverlay').classList.add('hidden');
     }
 
     function selectPlayer(name) {
@@ -1217,7 +1290,12 @@
       placed++;
       document.getElementById('scoreNum').textContent = placed;
       if (!wasSuboptimal) {
-        bcRef.set(syncedBirdCount + placed);
+        if (gameMode === 'ranked') {
+          bcRef.set(syncedBirdCount + placed);
+        } else {
+          syncedBirdCount += placed;
+          for (let i = 0; i < placed; i++) spawnBird();
+        }
       }
 
       if (placed === SLOTS) {
@@ -1249,15 +1327,17 @@
         msg.textContent = `Game over! No valid slot for ${currentNum}.`;
         msg.className = 'message lose';
       }
-      // Save to leaderboard
-      leaderboard.push({ name: currentPlayer, score: placed });
-      leaderboard.sort((a, b) => b.score - a.score);
-      saveLeaderboard();
-      // Update last played date
-      const today = new Date().toISOString().split('T')[0];
-      lastPlayed[currentPlayer] = today;
-      lpRef.set(lastPlayed);
-      renderLeaderboard(currentPlayer);
+      if (gameMode === 'ranked') {
+        // Save to leaderboard
+        leaderboard.push({ name: currentPlayer, score: placed });
+        leaderboard.sort((a, b) => b.score - a.score);
+        saveLeaderboard();
+        // Update last played date
+        const today = new Date().toISOString().split('T')[0];
+        lastPlayed[currentPlayer] = today;
+        lpRef.set(lastPlayed);
+        renderLeaderboard(currentPlayer);
+      }
       document.getElementById('restartBtn').classList.remove('hidden');
     }
 
@@ -1452,10 +1532,14 @@
         list.appendChild(row);
       });
       // Measure widest name and apply uniform width for column alignment
-      const nameEls = list.querySelectorAll('.lb-name');
-      let maxW = 0;
-      nameEls.forEach(el => { if (el.offsetWidth > maxW) maxW = el.offsetWidth; });
-      nameEls.forEach(el => { el.style.width = maxW + 'px'; });
+      // (skip if panel is hidden — offsetWidth would be 0)
+      const panel = document.querySelector('.leaderboard-panel');
+      if (panel.style.display !== 'none') {
+        const nameEls = list.querySelectorAll('.lb-name');
+        let maxW = 0;
+        nameEls.forEach(el => { if (el.offsetWidth > maxW) maxW = el.offsetWidth; });
+        nameEls.forEach(el => { el.style.width = maxW + 'px'; });
+      }
     }
 
     // ---- Sky & Pixel-art birds ----
@@ -1982,7 +2066,11 @@
         spawnOneBolt(bird.x + (Math.random() - 0.5) * 80, bird.x, bird.y);
       }
       if (toKill > 0) {
-        bcRef.set(Math.max(0, syncedBirdCount - toKill));
+        if (gameMode === 'ranked') {
+          bcRef.set(Math.max(0, syncedBirdCount - toKill));
+        } else {
+          syncedBirdCount = Math.max(0, syncedBirdCount - toKill);
+        }
       }
 
       // Spawn a couple extra ambient bolts
@@ -2130,6 +2218,9 @@
     }
 
     renderLeaderboard(null);
+    // Hide leaderboard and bird counter until mode is selected
+    document.querySelector('.leaderboard-panel').style.display = 'none';
+    document.querySelector('.bird-counter').style.display = 'none';
     animateBirds();
   </script>
 </body>
