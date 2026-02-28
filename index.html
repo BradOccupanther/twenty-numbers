@@ -612,6 +612,7 @@
     <canvas id="birdIcon" width="36" height="28"></canvas>
     <span id="birdCount">0</span>
   </div>
+  <button id="muteBtn" onclick="toggleMute()" title="Toggle sound" style="position:absolute;top:78px;right:10px;background:rgba(22,33,62,0.85);border:2px solid #0f3460;border-radius:10px;padding:6px 12px;cursor:pointer;font-size:1.3rem;color:#fff;z-index:2;">&#x1F50A;</button>
 
   <div class="game-area">
     <h1>Twenty Numbers</h1>
@@ -841,6 +842,10 @@
         }
       }
       document.getElementById('modeOverlay').classList.add('hidden');
+      // Initialize audio on first user interaction
+      ensureAudio();
+      startAmbientChirps();
+      if (weatherRain) startRainSound();
       if (mode === 'ranked') {
         document.querySelector('.leaderboard-panel').style.display = '';
         document.querySelector('.bird-counter').style.display = '';
@@ -996,6 +1001,348 @@
       document.getElementById('nameOverlay').classList.remove('hidden');
     }
 
+    // ========== SOUND SYSTEM (Web Audio API) ==========
+    let audioCtx = null;
+    let rainGain = null;
+    let rainSource = null;
+    let rainPlaying = false;
+    let chirpTimer = null;
+
+    function ensureAudio() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      return audioCtx;
+    }
+
+    // --- Bird chirp: short sine tweet ---
+    function playChirp() {
+      if (soundMuted) return;
+      const ctx = ensureAudio();
+      const now = ctx.currentTime;
+      const baseFreq = 2000 + Math.random() * 2500; // 2-4.5 kHz
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      // Quick pitch sweep up then down (tweet shape)
+      osc.frequency.setValueAtTime(baseFreq, now);
+      osc.frequency.linearRampToValueAtTime(baseFreq * (1.1 + Math.random() * 0.3), now + 0.05);
+      osc.frequency.linearRampToValueAtTime(baseFreq * (0.9 + Math.random() * 0.2), now + 0.12);
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.08 + Math.random() * 0.06, now + 0.02);
+      gain.gain.linearRampToValueAtTime(0, now + 0.12 + Math.random() * 0.06);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.2);
+
+      // Sometimes add a second tweet (double chirp)
+      if (Math.random() < 0.4) {
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.type = 'sine';
+        const delay = 0.12 + Math.random() * 0.05;
+        osc2.frequency.setValueAtTime(baseFreq * 1.15, now + delay);
+        osc2.frequency.linearRampToValueAtTime(baseFreq * 0.95, now + delay + 0.1);
+        gain2.gain.setValueAtTime(0, now + delay);
+        gain2.gain.linearRampToValueAtTime(0.06, now + delay + 0.02);
+        gain2.gain.linearRampToValueAtTime(0, now + delay + 0.1);
+        osc2.connect(gain2).connect(ctx.destination);
+        osc2.start(now + delay);
+        osc2.stop(now + delay + 0.15);
+      }
+    }
+
+    function startAmbientChirps() {
+      if (chirpTimer) return;
+      function scheduleChirp() {
+        const aliveBirds = birds.filter(b => !b.falling).length;
+        if (aliveBirds > 0 && audioCtx) {
+          playChirp();
+          // More birds = more frequent chirps
+          if (aliveBirds > 3 && Math.random() < 0.3) {
+            setTimeout(playChirp, 200 + Math.random() * 300);
+          }
+        }
+        const interval = Math.max(800, 4000 - aliveBirds * 150) + Math.random() * 2000;
+        chirpTimer = setTimeout(scheduleChirp, interval);
+      }
+      scheduleChirp();
+    }
+
+    // --- Rain ambient: filtered white noise ---
+    function startRainSound() {
+      if (rainPlaying || soundMuted) return;
+      const ctx = ensureAudio();
+      // Create white noise buffer
+      const bufferSize = ctx.sampleRate * 2;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+
+      rainSource = ctx.createBufferSource();
+      rainSource.buffer = buffer;
+      rainSource.loop = true;
+
+      // Bandpass filter for rain character
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.value = 800;
+      filter.Q.value = 0.5;
+
+      // High shelf for hiss
+      const hiss = ctx.createBiquadFilter();
+      hiss.type = 'highshelf';
+      hiss.frequency.value = 4000;
+      hiss.gain.value = 3;
+
+      rainGain = ctx.createGain();
+      rainGain.gain.setValueAtTime(0, ctx.currentTime);
+      rainGain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 2);
+
+      rainSource.connect(filter).connect(hiss).connect(rainGain).connect(ctx.destination);
+      rainSource.start();
+      rainPlaying = true;
+    }
+
+    function stopRainSound() {
+      if (!rainPlaying || !rainGain || !rainSource) return;
+      const ctx = ensureAudio();
+      rainGain.gain.linearRampToValueAtTime(0, ctx.currentTime + 2);
+      const src = rainSource;
+      setTimeout(() => { try { src.stop(); } catch(e) {} }, 2500);
+      rainPlaying = false;
+      rainSource = null;
+      rainGain = null;
+    }
+
+    // --- Good placement: pleasant ascending chime ---
+    function playGoodSound() {
+      if (soundMuted) return;
+      const ctx = ensureAudio();
+      const now = ctx.currentTime;
+      // Two-note ascending major third
+      const notes = [523, 659]; // C5, E5
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0, now + i * 0.08);
+        gain.gain.linearRampToValueAtTime(0.15, now + i * 0.08 + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.08 + 0.35);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(now + i * 0.08);
+        osc.stop(now + i * 0.08 + 0.4);
+      });
+    }
+
+    // --- Lightning / bad choice: realistic thunder ---
+    function playThunderSound() {
+      if (soundMuted) return;
+      const ctx = ensureAudio();
+      const now = ctx.currentTime;
+
+      // Helper: create a noise buffer of given duration
+      function noiseBuf(dur) {
+        const len = Math.floor(ctx.sampleRate * dur);
+        const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+        return buf;
+      }
+
+      // === LAYER 1: Electric zap/crack (the initial snap you hear) ===
+      // Fast sine sweep from high to low mimics the electrical discharge
+      const zap = ctx.createOscillator();
+      const zapGain = ctx.createGain();
+      const zapDist = ctx.createWaveShaperFunction ? null : ctx.createWaveShaper();
+      zap.type = 'sawtooth';
+      zap.frequency.setValueAtTime(3500, now);
+      zap.frequency.exponentialRampToValueAtTime(40, now + 0.12);
+      zapGain.gain.setValueAtTime(0.9, now);
+      zapGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      // Waveshaper for harsh distortion on the crack
+      const distCurve = new Float32Array(256);
+      for (let i = 0; i < 256; i++) {
+        const x = (i / 128) - 1;
+        distCurve[i] = (Math.PI + 4) * x / (Math.PI + 4 * Math.abs(x));
+      }
+      const distNode = ctx.createWaveShaper();
+      distNode.curve = distCurve;
+      distNode.oversample = '4x';
+      zap.connect(distNode).connect(zapGain).connect(ctx.destination);
+      zap.start(now);
+      zap.stop(now + 0.18);
+
+      // === LAYER 2: Sharp broadband crack (the "snap") ===
+      const crackBuf = noiseBuf(0.25);
+      const crackSrc = ctx.createBufferSource();
+      crackSrc.buffer = crackBuf;
+      const crackHP = ctx.createBiquadFilter();
+      crackHP.type = 'highpass';
+      crackHP.frequency.value = 1500;
+      const crackGain = ctx.createGain();
+      crackGain.gain.setValueAtTime(1.0, now);
+      crackGain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+      crackSrc.connect(crackHP).connect(crackGain).connect(ctx.destination);
+      crackSrc.start(now);
+
+      // === LAYER 3: Mid-range crackle/sizzle (the tearing sound) ===
+      const sizzleBuf = noiseBuf(0.8);
+      const sizzleSrc = ctx.createBufferSource();
+      sizzleSrc.buffer = sizzleBuf;
+      const sizzleBP = ctx.createBiquadFilter();
+      sizzleBP.type = 'bandpass';
+      sizzleBP.frequency.value = 400;
+      sizzleBP.Q.value = 0.6;
+      const sizzleGain = ctx.createGain();
+      sizzleGain.gain.setValueAtTime(0.8, now + 0.02);
+      sizzleGain.gain.exponentialRampToValueAtTime(0.3, now + 0.15);
+      sizzleGain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+      sizzleSrc.connect(sizzleBP).connect(sizzleGain).connect(ctx.destination);
+      sizzleSrc.start(now + 0.02);
+
+      // === LAYER 4: Deep bass boom (the chest-hitting thud) ===
+      const boomOsc = ctx.createOscillator();
+      const boomGain = ctx.createGain();
+      boomOsc.type = 'sine';
+      boomOsc.frequency.setValueAtTime(60, now + 0.02);
+      boomOsc.frequency.exponentialRampToValueAtTime(25, now + 0.6);
+      boomGain.gain.setValueAtTime(1.0, now + 0.02);
+      boomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+      boomOsc.connect(boomGain).connect(ctx.destination);
+      boomOsc.start(now + 0.02);
+      boomOsc.stop(now + 0.9);
+
+      // === LAYER 5: Long rolling rumble (the reverberant tail) ===
+      const rumbleBuf = noiseBuf(4);
+      const rumbleSrc = ctx.createBufferSource();
+      rumbleSrc.buffer = rumbleBuf;
+      const rumbleLP = ctx.createBiquadFilter();
+      rumbleLP.type = 'lowpass';
+      rumbleLP.frequency.value = 80;
+      rumbleLP.Q.value = 2;
+      const rumbleGain = ctx.createGain();
+      rumbleGain.gain.setValueAtTime(0.0, now);
+      rumbleGain.gain.linearRampToValueAtTime(0.7, now + 0.1);
+      rumbleGain.gain.setValueAtTime(0.7, now + 0.3);
+      // Rolling character: volume undulates as thunder echoes
+      rumbleGain.gain.linearRampToValueAtTime(0.4, now + 0.8);
+      rumbleGain.gain.linearRampToValueAtTime(0.55, now + 1.2);
+      rumbleGain.gain.linearRampToValueAtTime(0.25, now + 2.0);
+      rumbleGain.gain.linearRampToValueAtTime(0.35, now + 2.4);
+      rumbleGain.gain.exponentialRampToValueAtTime(0.001, now + 4);
+      rumbleSrc.connect(rumbleLP).connect(rumbleGain).connect(ctx.destination);
+      rumbleSrc.start(now + 0.05);
+
+      // === LAYER 6: Secondary crack echo (distant re-crack) ===
+      const echoBuf = noiseBuf(0.5);
+      const echoSrc = ctx.createBufferSource();
+      echoSrc.buffer = echoBuf;
+      const echoBP = ctx.createBiquadFilter();
+      echoBP.type = 'bandpass';
+      echoBP.frequency.value = 250;
+      echoBP.Q.value = 0.4;
+      const echoGain = ctx.createGain();
+      echoGain.gain.setValueAtTime(0.4, now + 0.3);
+      echoGain.gain.exponentialRampToValueAtTime(0.001, now + 1.0);
+      echoSrc.connect(echoBP).connect(echoGain).connect(ctx.destination);
+      echoSrc.start(now + 0.3);
+    }
+
+    // --- Win fanfare ---
+    function playWinSound() {
+      if (soundMuted) return;
+      const ctx = ensureAudio();
+      const now = ctx.currentTime;
+      const notes = [523, 659, 784, 1047]; // C5, E5, G5, C6 - major arpeggio
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.value = freq;
+        const t = now + i * 0.12;
+        gain.gain.setValueAtTime(0, t);
+        gain.gain.linearRampToValueAtTime(0.18, t + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.55);
+      });
+    }
+
+    // --- Lose sound: descending minor ---
+    function playLoseSound() {
+      if (soundMuted) return;
+      const ctx = ensureAudio();
+      const now = ctx.currentTime;
+      const notes = [440, 370, 330, 262]; // A4, F#4, E4, C4
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.value = freq;
+        const t = now + i * 0.15;
+        gain.gain.setValueAtTime(0, t);
+        gain.gain.linearRampToValueAtTime(0.14, t + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.55);
+      });
+    }
+
+    // --- Spin sound: slot machine tick ---
+    function playSpinTick() {
+      if (soundMuted) return;
+      const ctx = ensureAudio();
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.value = 800 + Math.random() * 400;
+      gain.gain.setValueAtTime(0.04, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.03);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.04);
+    }
+
+    // --- Digit reveal click ---
+    function playRevealClick() {
+      if (soundMuted) return;
+      const ctx = ensureAudio();
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 1200;
+      gain.gain.setValueAtTime(0.1, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.07);
+    }
+
+    // --- Mute toggle ---
+    let soundMuted = false;
+    function toggleMute() {
+      soundMuted = !soundMuted;
+      document.getElementById('muteBtn').innerHTML = soundMuted ? '&#x1F507;' : '&#x1F50A;';
+      if (soundMuted) {
+        stopRainSound();
+        if (chirpTimer) { clearTimeout(chirpTimer); chirpTimer = null; }
+      } else {
+        if (audioCtx) {
+          startAmbientChirps();
+          if (weatherRain) startRainSound();
+        }
+      }
+    }
+
+    // ========== END SOUND SYSTEM ==========
+
     let spinning = false;
     let waitingForSpin = false;
 
@@ -1107,6 +1454,7 @@
 
       function revealNextDigit() {
         revealed++;
+        playRevealClick();
         if (revealed >= numDigits) {
           // All digits revealed
           clearInterval(cycleTimer);
@@ -1275,6 +1623,7 @@
         if (chosenScore < bestScore) {
           wasSuboptimal = true;
           spawnLightning((placed + 1) * 2);
+          playThunderSound();
           hintBox.innerHTML =
             `<div class="hint-title">Better move was <span class="hint-best">Slot #${bestSlot + 1}</span></div>`;
           hintBox.classList.remove('hidden');
@@ -1290,6 +1639,7 @@
       placed++;
       document.getElementById('scoreNum').textContent = placed;
       if (!wasSuboptimal) {
+        playGoodSound();
         if (gameMode === 'ranked') {
           bcRef.set(syncedBirdCount + placed);
         } else {
@@ -1323,9 +1673,11 @@
       if (won) {
         msg.textContent = 'You win! All 20 numbers placed!';
         msg.className = 'message win';
+        playWinSound();
       } else {
         msg.textContent = `Game over! No valid slot for ${currentNum}.`;
         msg.className = 'message lose';
+        playLoseSound();
       }
       if (gameMode === 'ranked') {
         // Save to leaderboard
@@ -1681,6 +2033,10 @@
           if (weatherSnow && snowFlakes.length === 0) initSnow();
           if (!weatherRain) rainDrops = [];
           if (!weatherSnow) snowFlakes = [];
+
+          // Sync rain sound with weather
+          if (weatherRain && audioCtx) startRainSound();
+          if (!weatherRain) stopRainSound();
 
         })
         .catch(() => {});
