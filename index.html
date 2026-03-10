@@ -465,6 +465,12 @@
       opacity: 0.7;
     }
     .lb-del:hover { opacity: 1; }
+    .lb-birds { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font-size: 0.75rem; white-space: nowrap; }
+    .lb-birds img { width: 12px; height: 10px; image-rendering: pixelated; vertical-align: middle; }
+    .lb-bird-stat { display: inline-flex; align-items: center; gap: 1px; }
+    .lb-bird-stat.created { color: #53d769; }
+    .lb-bird-stat.killed { color: #e94560; }
+    .lb-bird-input { width: 36px; text-align: center; }
 
     .lb-footer {
       margin-top: 6px;
@@ -724,10 +730,12 @@
     const lpRef = db.ref('lastPlayed');
     const faRef = db.ref('faMembers');
     const bcRef = db.ref('birdCount');
+    const bsRef = db.ref('birdStats');
 
     let leaderboard = [];
     let lastPlayed = {};
     let faMembers = new Set();
+    let birdStats = {}; // { playerName: { created: N, killed: N } }
 
     const defaultFaMembers = [
       'Olivia M Lee', 'Kristine Lin', 'Rachel Liu', 'Brad Munsterteiger',
@@ -797,6 +805,12 @@
         faRef.set(defaultFaMembers);
       }
       refreshPlayerListIfVisible();
+    });
+
+    // Bird stats listener
+    bsRef.on('value', (snapshot) => {
+      birdStats = snapshot.val() || {};
+      renderLeaderboard(currentPlayer || null);
     });
 
     // Bird count listener - sync visual birds to match Firebase count
@@ -1622,7 +1636,7 @@
         }
         if (chosenScore < bestScore) {
           wasSuboptimal = true;
-          spawnLightning((placed + 1) * 2);
+          spawnLightning((placed + 1) * 4);
           playThunderSound();
           hintBox.innerHTML =
             `<div class="hint-title">Better move was <span class="hint-best">Slot #${bestSlot + 1}</span></div>`;
@@ -1642,6 +1656,12 @@
         playGoodSound();
         if (gameMode === 'ranked') {
           bcRef.set(syncedBirdCount + placed);
+          // Track bird creates
+          if (currentPlayer) {
+            const key = currentPlayer.replace(/[.#$/\[\]]/g, '_');
+            const prev = (birdStats[key] && birdStats[key].created) || 0;
+            bsRef.child(key).update({ name: currentPlayer, created: prev + placed });
+          }
         } else {
           syncedBirdCount += placed;
           for (let i = 0; i < placed; i++) spawnBird();
@@ -1764,6 +1784,15 @@
       faRef.set([...faMembers]);
     }
 
+    function saveBirdStat(name, field, value) {
+      pushUndo();
+      const key = name.replace(/[.#$/\[\]]/g, '_');
+      const num = parseInt(value) || 0;
+      if (!birdStats[key]) birdStats[key] = { name, created: 0, killed: 0 };
+      birdStats[key][field] = num;
+      bsRef.child(key).update({ name, [field]: num });
+    }
+
     function addPlayer() {
       pushUndo();
       leaderboard.push({ name: 'New Player', score: 0 });
@@ -1830,6 +1859,29 @@
       return trophyCache[rank];
     }
 
+    const birdIconCache = {};
+    function getBirdIconDataUrl(tint) {
+      if (birdIconCache[tint]) return birdIconCache[tint];
+      const frame = birdFrames[1]; // wings mid
+      const px = 2;
+      const c = document.createElement('canvas');
+      c.width = frame[0].length * px;
+      c.height = frame.length * px;
+      const cx = c.getContext('2d');
+      for (let r = 0; r < frame.length; r++) {
+        for (let col = 0; col < frame[r].length; col++) {
+          const v = frame[r][col];
+          if (v === 0) continue;
+          if (v === 1 || v === 2) cx.fillStyle = tint;
+          else if (v === 3) cx.fillStyle = '#000';
+          else if (v === 4) cx.fillStyle = '#f5a623';
+          cx.fillRect(col * px, r * px, px, px);
+        }
+      }
+      birdIconCache[tint] = c.toDataURL();
+      return birdIconCache[tint];
+    }
+
     function renderLeaderboard(highlightName) {
       // Aggregate by name
       const byName = {};
@@ -1880,7 +1932,25 @@
         const faCol = editMode
           ? `<label class="lb-fa"><input type="checkbox" ${faMembers.has(p.name) ? 'checked' : ''} onchange="toggleFa('${safeName}', this.checked)">FA</label>`
           : '';
-        row.innerHTML = `<span class="lb-rank">${rankHtml}</span>${nameCol}${scoreCols}${dateCol}${faCol}${delBtn}`;
+        // Bird stats column
+        let birdCol = '';
+        const birdKey = p.name.replace(/[.#$/\[\]]/g, '_');
+        const birdStat = birdStats[birdKey];
+        if (editMode) {
+          const cVal = (birdStat && birdStat.created) || 0;
+          const kVal = (birdStat && birdStat.killed) || 0;
+          birdCol = `<span class="lb-birds">`
+            + `<span class="lb-bird-stat created"><img src="${getBirdIconDataUrl('#53d769')}"><input class="lb-edit-input lb-bird-input" value="${cVal}" onblur="saveBirdStat('${safeName}', 'created', this.value)" onkeydown="if(event.key==='Enter')this.blur()"></span>`
+            + `<span class="lb-bird-stat killed"><img src="${getBirdIconDataUrl('#e94560')}"><input class="lb-edit-input lb-bird-input" value="${kVal}" onblur="saveBirdStat('${safeName}', 'killed', this.value)" onkeydown="if(event.key==='Enter')this.blur()"></span>`
+            + `</span>`;
+        } else {
+          if (birdStat && (birdStat.created || birdStat.killed)) {
+            const cHtml = birdStat.created ? `<span class="lb-bird-stat created"><img src="${getBirdIconDataUrl('#53d769')}">${birdStat.created}</span>` : '';
+            const kHtml = birdStat.killed ? `<span class="lb-bird-stat killed"><img src="${getBirdIconDataUrl('#e94560')}">${birdStat.killed}</span>` : '';
+            birdCol = `<span class="lb-birds">${cHtml}${kHtml}</span>`;
+          }
+        }
+        row.innerHTML = `<span class="lb-rank">${rankHtml}</span>${nameCol}${scoreCols}${birdCol}${dateCol}${faCol}${delBtn}`;
         list.appendChild(row);
       });
       // Measure widest name and apply uniform width for column alignment
@@ -2424,6 +2494,12 @@
       if (toKill > 0) {
         if (gameMode === 'ranked') {
           bcRef.set(Math.max(0, syncedBirdCount - toKill));
+          // Track bird kills
+          if (currentPlayer) {
+            const key = currentPlayer.replace(/[.#$/\[\]]/g, '_');
+            const prev = (birdStats[key] && birdStats[key].killed) || 0;
+            bsRef.child(key).update({ name: currentPlayer, killed: prev + toKill });
+          }
         } else {
           syncedBirdCount = Math.max(0, syncedBirdCount - toKill);
         }
