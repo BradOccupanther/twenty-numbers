@@ -418,6 +418,140 @@
       flex: 1;
     }
 
+    /* Player Card */
+    .player-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      min-width: 340px;
+      max-width: 400px;
+    }
+
+    .player-card-title {
+      text-align: center;
+    }
+
+    .player-card-name {
+      font-size: 1.4rem;
+      font-weight: bold;
+      color: #fff;
+      margin-bottom: 2px;
+    }
+
+    .player-card-rank {
+      font-size: 0.9rem;
+      color: #53d769;
+    }
+
+    .rank-up {
+      display: inline-block;
+      color: #ffd700;
+      font-weight: bold;
+      animation: rankPulse 0.6s ease-in-out 3;
+    }
+
+    @keyframes rankPulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.2); }
+    }
+
+    .player-card-stats {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .player-card-stat {
+      background: rgba(15, 52, 96, 0.5);
+      border: 1px solid #0f3460;
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+    }
+
+    .player-card-stat.wide {
+      grid-column: 1 / -1;
+    }
+
+    .player-card-stat-label {
+      font-size: 0.7rem;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+
+    .player-card-stat-value {
+      font-size: 1.1rem;
+      font-weight: bold;
+      color: #fff;
+    }
+
+    .player-card-stat-value .sub {
+      font-size: 0.75rem;
+      color: #888;
+      font-weight: normal;
+    }
+
+    .player-card-birds {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+    }
+
+    .player-card-bird-stat {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .player-card-bird-stat img {
+      width: 18px;
+      height: 14px;
+      image-rendering: pixelated;
+    }
+
+    .player-card-scores {
+      font-size: 0.85rem;
+      color: #aaa;
+      word-break: break-word;
+    }
+
+    .player-card-actions {
+      display: flex;
+      gap: 10px;
+      width: 100%;
+    }
+
+    .player-card-actions button {
+      flex: 1;
+    }
+
+    .player-card-actions .back-btn {
+      background: #0f3460;
+    }
+
+    .player-card-actions .back-btn:hover {
+      background: #1a4a7a;
+    }
+
+    .player-card-accomplishments {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .accomplishment-icon {
+      width: 24px;
+      height: 32px;
+      image-rendering: pixelated;
+      cursor: help;
+    }
+
+
     .lb-row {
       display: flex;
       padding: 3px 6px;
@@ -604,6 +738,20 @@
     </div>
   </div>
 
+  <div id="playerCardOverlay" class="overlay hidden">
+    <div class="overlay-box player-card">
+      <div class="player-card-title">
+        <div class="player-card-name" id="playerCardName"></div>
+        <div class="player-card-rank" id="playerCardRank"></div>
+      </div>
+      <div class="player-card-stats" id="playerCardStats"></div>
+      <div class="player-card-actions">
+        <button class="back-btn" onclick="closePlayerCard()">Back</button>
+        <button onclick="confirmPlayerCard()">Play!</button>
+      </div>
+    </div>
+  </div>
+
   <div class="leaderboard-panel">
     <div class="lb-title">Leaderboard</div>
     <div class="lb-list" id="leaderboardList"></div>
@@ -731,11 +879,13 @@
     const faRef = db.ref('faMembers');
     const bcRef = db.ref('birdCount');
     const bsRef = db.ref('birdStats');
-
+    const acRef = db.ref('accomplishments');
     let leaderboard = [];
     let lastPlayed = {};
     let faMembers = new Set();
     let birdStats = {}; // { playerName: { created: N, killed: N } }
+    let accomplishments = {}; // { playerKey: { stormChaser: true, ... } }
+    let lightningCount = 0; // per-game lightning strike counter
 
     const defaultFaMembers = [
       'Olivia M Lee', 'Kristine Lin', 'Rachel Liu', 'Brad Munsterteiger',
@@ -811,6 +961,11 @@
     bsRef.on('value', (snapshot) => {
       birdStats = snapshot.val() || {};
       renderLeaderboard(currentPlayer || null);
+    });
+
+    // Accomplishments listener
+    acRef.on('value', (snapshot) => {
+      accomplishments = snapshot.val() || {};
     });
 
     // Bird count listener - sync visual birds to match Firebase count
@@ -904,11 +1059,135 @@
       gameOver = true;
       document.getElementById('modeOverlay').classList.remove('hidden');
       document.getElementById('nameOverlay').classList.add('hidden');
+      document.getElementById('playerCardOverlay').classList.add('hidden');
     }
 
     function selectPlayer(name) {
       currentPlayer = name;
       document.getElementById('nameOverlay').classList.add('hidden');
+      showPlayerCard(name);
+    }
+
+    function getPlayerRank(name) {
+      const byName = {};
+      for (const entry of leaderboard) {
+        if (!byName[entry.name]) byName[entry.name] = [];
+        byName[entry.name].push(entry.score);
+      }
+      const players = Object.keys(byName).map(n => {
+        const s = byName[n].slice().sort((a, b) => b - a);
+        return { name: n, scores: s };
+      }).sort((a, b) => {
+        for (let i = 0; i < Math.max(a.scores.length, b.scores.length); i++) {
+          const diff = (b.scores[i] || 0) - (a.scores[i] || 0);
+          if (diff !== 0) return diff;
+        }
+        return 0;
+      });
+      const idx = players.findIndex(p => p.name === name);
+      return { rank: idx >= 0 ? idx + 1 : -1, total: players.length };
+    }
+
+    function showPlayerCard(name, opts) {
+      opts = opts || {};
+      const postGame = opts.postGame || false;
+      const prevRank = opts.prevRank || -1;
+
+      document.getElementById('playerCardName').textContent = name;
+
+      // Compute stats
+      const scores = leaderboard.filter(e => e.name === name).map(e => e.score);
+      const gamesPlayed = scores.length;
+      const bestScore = gamesPlayed > 0 ? Math.max(...scores) : 0;
+      const avgScore = gamesPlayed > 0 ? (scores.reduce((a, b) => a + b, 0) / gamesPlayed).toFixed(1) : '—';
+
+      // Rank
+      const { rank, total } = getPlayerRank(name);
+      const rankEl = document.getElementById('playerCardRank');
+      if (rank > 0 && prevRank > 0 && rank < prevRank) {
+        const jump = prevRank - rank;
+        rankEl.innerHTML = `Rank #${rank} of ${total} <span class="rank-up">&#9650; Up ${jump}!</span>`;
+      } else {
+        rankEl.textContent = rank >= 0 ? `Rank #${rank} of ${total}` : 'New Player';
+      }
+
+      // Bird stats
+      const birdKey = name.replace(/[.#$/\[\]]/g, '_');
+      const bs = birdStats[birdKey];
+      const birdsCreated = (bs && bs.created) || 0;
+      const birdsKilled = (bs && bs.killed) || 0;
+
+      // Build stats grid
+      const statsEl = document.getElementById('playerCardStats');
+      let statsHtml = `
+        <div class="player-card-stat">
+          <div class="player-card-stat-label">Games Played</div>
+          <div class="player-card-stat-value">${gamesPlayed}</div>
+        </div>
+        <div class="player-card-stat">
+          <div class="player-card-stat-label">Best Score</div>
+          <div class="player-card-stat-value">${gamesPlayed > 0 ? bestScore : '—'}</div>
+        </div>
+        <div class="player-card-stat">
+          <div class="player-card-stat-label">Avg Score</div>
+          <div class="player-card-stat-value">${avgScore}</div>
+        </div>
+        <div class="player-card-stat">
+          <div class="player-card-stat-label">Birds</div>
+          <div class="player-card-stat-value player-card-birds">
+            <span class="player-card-bird-stat"><img src="${getBirdIconDataUrl('#53d769')}">${birdsCreated}</span>
+            <span class="player-card-bird-stat"><img src="${getBirdIconDataUrl('#e94560')}">${birdsKilled}</span>
+          </div>
+        </div>`;
+
+      // Accomplishments
+      const pKey = name.replace(/[.#$/\[\]]/g, '_');
+      const playerAcc = accomplishments[pKey] || {};
+      let accHtml = '';
+      if (playerAcc.stormChaser) {
+        accHtml += `<img class="accomplishment-icon" src="${getLightningIconDataUrl()}" title="Storm Chaser: Trigger lightning 5 times in one game">`;
+      }
+      if (playerAcc.birdKiller) {
+        accHtml += `<img class="accomplishment-icon" src="${getDeadBirdIconDataUrl()}" title="Bird Killer: Kill 100 birds">`;
+      }
+      if (playerAcc.birdLover) {
+        accHtml += `<img class="accomplishment-icon" src="${getBirdIconDataUrl('#53d769')}" title="Bird Lover: Create 100 birds">`;
+      }
+      statsHtml += `
+        <div class="player-card-stat wide">
+          <div class="player-card-stat-label">Accomplishments</div>
+          <div class="player-card-stat-value player-card-accomplishments">${accHtml || '—'}</div>
+        </div>`;
+
+      statsEl.innerHTML = statsHtml;
+
+      // Update action buttons based on context
+      const actionsEl = document.querySelector('.player-card-actions');
+      if (postGame) {
+        actionsEl.innerHTML = `
+          <button class="back-btn" onclick="closePlayerCardToMenu()">Change Player</button>
+          <button onclick="confirmPlayerCard()">Play Again!</button>`;
+      } else {
+        actionsEl.innerHTML = `
+          <button class="back-btn" onclick="closePlayerCard()">Back</button>
+          <button onclick="confirmPlayerCard()">Play!</button>`;
+      }
+
+      document.getElementById('playerCardOverlay').classList.remove('hidden');
+    }
+
+    function closePlayerCard() {
+      document.getElementById('playerCardOverlay').classList.add('hidden');
+      showNamePrompt();
+    }
+
+    function closePlayerCardToMenu() {
+      document.getElementById('playerCardOverlay').classList.add('hidden');
+      showNamePrompt();
+    }
+
+    function confirmPlayerCard() {
+      document.getElementById('playerCardOverlay').classList.add('hidden');
       startGame();
     }
 
@@ -1366,6 +1645,7 @@
       placed = 0;
       spinning = false;
       waitingForSpin = false;
+      lightningCount = 0;
       document.getElementById('message').textContent = '';
       document.getElementById('message').className = 'message';
       document.getElementById('restartBtn').classList.add('hidden');
@@ -1636,8 +1916,19 @@
         }
         if (chosenScore < bestScore) {
           wasSuboptimal = true;
+          lightningCount++;
           spawnLightning((placed + 1) * 4);
           playThunderSound();
+          // Check Storm Chaser accomplishment mid-game
+          if (gameMode === 'ranked' && lightningCount === 5 && currentPlayer) {
+            const pKey = currentPlayer.replace(/[.#$/\[\]]/g, '_');
+            if (!(accomplishments[pKey] && accomplishments[pKey].stormChaser)) {
+              if (!accomplishments[pKey]) accomplishments[pKey] = {};
+              accomplishments[pKey].stormChaser = true;
+              acRef.child(pKey).update({ stormChaser: true });
+              spawnBannerBird(getLightningIconDataUrl(), 'Storm Chaser');
+            }
+          }
           hintBox.innerHTML =
             `<div class="hint-title">Better move was <span class="hint-best">Slot #${bestSlot + 1}</span></div>`;
           hintBox.classList.remove('hidden');
@@ -1660,7 +1951,15 @@
           if (currentPlayer) {
             const key = currentPlayer.replace(/[.#$/\[\]]/g, '_');
             const prev = (birdStats[key] && birdStats[key].created) || 0;
-            bsRef.child(key).update({ name: currentPlayer, created: prev + placed });
+            const newCreated = prev + placed;
+            bsRef.child(key).update({ name: currentPlayer, created: newCreated });
+            // Check Bird Lover accomplishment
+            if (newCreated >= 100 && !(accomplishments[key] && accomplishments[key].birdLover)) {
+              if (!accomplishments[key]) accomplishments[key] = {};
+              accomplishments[key].birdLover = true;
+              acRef.child(key).update({ birdLover: true });
+              spawnBannerBird(getBirdIconDataUrl('#53d769'), 'Bird Lover');
+            }
           }
         } else {
           syncedBirdCount += placed;
@@ -1700,6 +1999,8 @@
         playLoseSound();
       }
       if (gameMode === 'ranked') {
+        // Compute rank before saving new score
+        const prevRank = getPlayerRank(currentPlayer).rank;
         // Save to leaderboard
         leaderboard.push({ name: currentPlayer, score: placed });
         leaderboard.sort((a, b) => b.score - a.score);
@@ -1709,8 +2010,11 @@
         lastPlayed[currentPlayer] = today;
         lpRef.set(lastPlayed);
         renderLeaderboard(currentPlayer);
+        // Show player card with updated stats
+        showPlayerCard(currentPlayer, { postGame: true, prevRank: prevRank });
+      } else {
+        document.getElementById('restartBtn').classList.remove('hidden');
       }
-      document.getElementById('restartBtn').classList.remove('hidden');
     }
 
     let editMode = false;
@@ -1880,6 +2184,69 @@
       }
       birdIconCache[tint] = c.toDataURL();
       return birdIconCache[tint];
+    }
+
+    let lightningIconCache = null;
+    function getLightningIconDataUrl() {
+      if (lightningIconCache) return lightningIconCache;
+      // 9x13 pixel art lightning bolt
+      const bolt = [
+        [0,0,0,0,0,1,1,0,0],
+        [0,0,0,0,1,1,0,0,0],
+        [0,0,0,1,1,1,0,0,0],
+        [0,0,1,1,1,0,0,0,0],
+        [0,1,1,1,0,0,0,0,0],
+        [1,1,1,1,1,1,1,0,0],
+        [0,0,0,0,1,1,1,0,0],
+        [0,0,0,1,1,1,0,0,0],
+        [0,0,0,1,1,0,0,0,0],
+        [0,0,1,1,0,0,0,0,0],
+        [0,1,1,0,0,0,0,0,0],
+        [0,1,0,0,0,0,0,0,0],
+        [1,0,0,0,0,0,0,0,0],
+      ];
+      const px = 2;
+      const c = document.createElement('canvas');
+      c.width = bolt[0].length * px;
+      c.height = bolt.length * px;
+      const cx = c.getContext('2d');
+      for (let r = 0; r < bolt.length; r++) {
+        for (let col = 0; col < bolt[r].length; col++) {
+          if (bolt[r][col] === 0) continue;
+          cx.fillStyle = '#ffd700';
+          cx.fillRect(col * px, r * px, px, px);
+        }
+      }
+      lightningIconCache = c.toDataURL();
+      return lightningIconCache;
+    }
+
+    let deadBirdIconCache = null;
+    function getDeadBirdIconDataUrl() {
+      if (deadBirdIconCache) return deadBirdIconCache;
+      // Dead bird: upside-down red bird using same frame as bird icon (wings mid)
+      const frame = birdFrames[1];
+      const px = 2;
+      const c = document.createElement('canvas');
+      c.width = frame[0].length * px;
+      c.height = frame.length * px;
+      const cx = c.getContext('2d');
+      cx.save();
+      cx.translate(0, c.height);
+      cx.scale(1, -1);
+      for (let r = 0; r < frame.length; r++) {
+        for (let col = 0; col < frame[r].length; col++) {
+          const v = frame[r][col];
+          if (v === 0) continue;
+          if (v === 1 || v === 2) cx.fillStyle = '#e94560';
+          else if (v === 3) cx.fillStyle = '#000';
+          else if (v === 4) cx.fillStyle = '#f5a623';
+          cx.fillRect(col * px, r * px, px, px);
+        }
+      }
+      cx.restore();
+      deadBirdIconCache = c.toDataURL();
+      return deadBirdIconCache;
     }
 
     function renderLeaderboard(highlightName) {
@@ -2296,6 +2663,99 @@
       });
     }
 
+    function spawnBannerBird(iconDataUrl, text) {
+      const goingRight = Math.random() > 0.5;
+      const bird = {
+        x: goingRight ? -40 : canvas.width + 40,
+        y: canvas.height * 0.15 + Math.random() * canvas.height * 0.2,
+        vx: (goingRight ? 1 : -1) * 1.2,
+        vy: 0,
+        frame: 0,
+        frameTick: 0,
+        color: { body: '#ffd700', wing: '#ffec80', eye: '#000', beak: '#f5a623' },
+        dir: goingRight ? 1 : -1,
+        wobble: Math.random() * Math.PI * 2,
+        scale: 4,
+        banner: { iconDataUrl, text, img: null },
+      };
+      // Preload the icon image for canvas drawing
+      const img = new Image();
+      img.src = iconDataUrl;
+      bird.banner.img = img;
+      birds.push(bird);
+    }
+
+    function drawBanner(bird) {
+      const px = bird.scale;
+      const cols = birdFrames[0][0].length;
+      const birdW = cols * px;
+      const birdH = birdFrames[0].length * px;
+      const banner = bird.banner;
+
+      // Banner dimensions (2x size)
+      ctx.font = 'bold 20px monospace';
+      const textWidth = ctx.measureText(banner.text).width;
+      const bannerW = textWidth + 52; // icon + padding + text
+      const bannerH = 38;
+
+      // Position: trailing behind the bird horizontally
+      const ropeLen = 20;
+      const birdCenterY = bird.y + birdH / 2;
+      const by = birdCenterY - bannerH / 2;
+      let bx;
+      if (bird.dir > 0) {
+        // Bird going right, banner trails to the left
+        bx = bird.x - ropeLen - bannerW;
+      } else {
+        // Bird going left, banner trails to the right
+        bx = bird.x + birdW + ropeLen;
+      }
+
+      // Rope from bird tail to banner
+      ctx.strokeStyle = '#888';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      if (bird.dir > 0) {
+        ctx.moveTo(bird.x, birdCenterY);
+        ctx.lineTo(bx + bannerW, birdCenterY);
+      } else {
+        ctx.moveTo(bird.x + birdW, birdCenterY);
+        ctx.lineTo(bx, birdCenterY);
+      }
+      ctx.stroke();
+
+      // Banner background
+      ctx.fillStyle = 'rgba(22, 33, 62, 0.9)';
+      ctx.strokeStyle = '#ffd700';
+      ctx.lineWidth = 2;
+      const r = 6;
+      ctx.beginPath();
+      ctx.moveTo(bx + r, by);
+      ctx.lineTo(bx + bannerW - r, by);
+      ctx.quadraticCurveTo(bx + bannerW, by, bx + bannerW, by + r);
+      ctx.lineTo(bx + bannerW, by + bannerH - r);
+      ctx.quadraticCurveTo(bx + bannerW, by + bannerH, bx + bannerW - r, by + bannerH);
+      ctx.lineTo(bx + r, by + bannerH);
+      ctx.quadraticCurveTo(bx, by + bannerH, bx, by + bannerH - r);
+      ctx.lineTo(bx, by + r);
+      ctx.quadraticCurveTo(bx, by, bx + r, by);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Icon
+      if (banner.img && banner.img.complete) {
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(banner.img, bx + 8, by + 3, 30, 30);
+        ctx.imageSmoothingEnabled = true;
+      }
+
+      // Text
+      ctx.fillStyle = '#ffd700';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(banner.text, bx + 42, by + bannerH / 2);
+    }
+
     function drawBird(bird) {
       const frame = birdFrames[bird.frame];
       const px = bird.scale;
@@ -2498,7 +2958,15 @@
           if (currentPlayer) {
             const key = currentPlayer.replace(/[.#$/\[\]]/g, '_');
             const prev = (birdStats[key] && birdStats[key].killed) || 0;
-            bsRef.child(key).update({ name: currentPlayer, killed: prev + toKill });
+            const newKilled = prev + toKill;
+            bsRef.child(key).update({ name: currentPlayer, killed: newKilled });
+            // Check Bird Killer accomplishment
+            if (newKilled >= 100 && !(accomplishments[key] && accomplishments[key].birdKiller)) {
+              if (!accomplishments[key]) accomplishments[key] = {};
+              accomplishments[key].birdKiller = true;
+              acRef.child(key).update({ birdKiller: true });
+              spawnBannerBird(getDeadBirdIconDataUrl(), 'Bird Killer');
+            }
           }
         } else {
           syncedBirdCount = Math.max(0, syncedBirdCount - toKill);
@@ -2607,16 +3075,19 @@
             b.frame = (b.frame + 1) % birdFrames.length;
           }
 
-          // Wrap around screen
+          // Wrap around screen (banner birds fly off and disappear)
           if (b.dir > 0 && b.x > canvas.width + 60) {
+            if (b.banner) { birds.splice(i, 1); continue; }
             b.x = -50;
             b.y = Math.random() * canvas.height * 0.7 + 20;
           } else if (b.dir < 0 && b.x < -60) {
+            if (b.banner) { birds.splice(i, 1); continue; }
             b.x = canvas.width + 50;
             b.y = Math.random() * canvas.height * 0.7 + 20;
           }
 
           drawBird(b);
+          if (b.banner) drawBanner(b);
         }
       }
 
