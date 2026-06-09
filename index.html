@@ -1652,8 +1652,7 @@
       document.getElementById('numberBox').classList.remove('hidden', 'gameover', 'spinning', 'revealed');
       document.getElementById('hintBox').classList.add('hidden');
       document.getElementById('numberLabel').textContent = 'Place this number:';
-      document.getElementById('scoreBox').classList.add('hidden');
-      document.getElementById('scoreBox').classList.remove('gameover');
+      document.getElementById('scoreBox').classList.remove('hidden', 'gameover');
       document.getElementById('scoreLabel').textContent = 'Score:';
       document.getElementById('scoreNum').textContent = '0';
       buildGrid();
