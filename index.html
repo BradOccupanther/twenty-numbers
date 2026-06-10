@@ -1298,6 +1298,7 @@
     let audioCtx = null;
     let rainGain = null;
     let rainSource = null;
+    let rainLfo = null;
     let rainPlaying = false;
     let chirpTimer = null;
 
@@ -1363,37 +1364,59 @@
       scheduleChirp();
     }
 
-    // --- Rain ambient: filtered white noise ---
+    // --- Rain ambient: shaped brown noise (warm "rush" + patter, not hiss) ---
     function startRainSound() {
       if (rainPlaying || soundMuted) return;
       const ctx = ensureAudio();
-      // Create white noise buffer
+      const now = ctx.currentTime;
+
+      // Brown-ish noise buffer: integrate white noise so there's real low-end
+      // body instead of bright white-noise hiss (which sounds like static).
       const bufferSize = ctx.sampleRate * 2;
       const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
       const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+      let last = 0;
+      for (let i = 0; i < bufferSize; i++) {
+        const white = Math.random() * 2 - 1;
+        last = (last + 0.02 * white) / 1.02;
+        data[i] = last * 3.5; // compensate for the level lost to integration
+      }
 
       rainSource = ctx.createBufferSource();
       rainSource.buffer = buffer;
       rainSource.loop = true;
 
-      // Bandpass filter for rain character
-      const filter = ctx.createBiquadFilter();
-      filter.type = 'bandpass';
-      filter.frequency.value = 800;
-      filter.Q.value = 0.5;
+      // Layer 1 — warm downpour body: lowpass tames the harsh treble.
+      const lowFilter = ctx.createBiquadFilter();
+      lowFilter.type = 'lowpass';
+      lowFilter.frequency.value = 1100;
+      lowFilter.Q.value = 0.7;
 
-      // High shelf for hiss
-      const hiss = ctx.createBiquadFilter();
-      hiss.type = 'highshelf';
-      hiss.frequency.value = 4000;
-      hiss.gain.value = 3;
+      // Layer 2 — the "shhh" patter: a gentle bandpass, mixed in quieter.
+      const midFilter = ctx.createBiquadFilter();
+      midFilter.type = 'bandpass';
+      midFilter.frequency.value = 1900;
+      midFilter.Q.value = 0.6;
+      const midGain = ctx.createGain();
+      midGain.gain.value = 0.45;
 
       rainGain = ctx.createGain();
-      rainGain.gain.setValueAtTime(0, ctx.currentTime);
-      rainGain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 2);
+      rainGain.gain.setValueAtTime(0, now);
+      rainGain.gain.linearRampToValueAtTime(0.18, now + 2);
 
-      rainSource.connect(filter).connect(hiss).connect(rainGain).connect(ctx.destination);
+      rainSource.connect(lowFilter).connect(rainGain);
+      rainSource.connect(midFilter).connect(midGain).connect(rainGain);
+      rainGain.connect(ctx.destination);
+
+      // Slow gusts so it breathes instead of sitting as a flat wall of noise.
+      rainLfo = ctx.createOscillator();
+      const lfoGain = ctx.createGain();
+      rainLfo.type = 'sine';
+      rainLfo.frequency.value = 0.13;
+      lfoGain.gain.value = 0.05;
+      rainLfo.connect(lfoGain).connect(rainGain.gain);
+      rainLfo.start(now);
+
       rainSource.start();
       rainPlaying = true;
     }
@@ -1403,10 +1426,15 @@
       const ctx = ensureAudio();
       rainGain.gain.linearRampToValueAtTime(0, ctx.currentTime + 2);
       const src = rainSource;
-      setTimeout(() => { try { src.stop(); } catch(e) {} }, 2500);
+      const lfo = rainLfo;
+      setTimeout(() => {
+        try { src.stop(); } catch(e) {}
+        try { if (lfo) lfo.stop(); } catch(e) {}
+      }, 2500);
       rainPlaying = false;
       rainSource = null;
       rainGain = null;
+      rainLfo = null;
     }
 
     // --- Good placement: pleasant ascending chime ---
@@ -2430,6 +2458,10 @@
     let weatherCode = 0;
     let weatherCloudCover = 0;
     let weatherWindSpeed = 10;
+    // Testing override: force a weather type regardless of the real forecast.
+    // Accepts 'rain', 'snow', 'storm', or null (= use actual current weather).
+    let FORCE_WEATHER = null;
+
     let weatherRain = false;
     let weatherSnow = false;
     let weatherStorm = false;
@@ -2463,6 +2495,14 @@
           weatherStorm = [95,96,99].includes(weatherCode);
           weatherFog = [45,48].includes(weatherCode);
           if (weatherStorm) weatherRain = true;
+
+          // TEMPORARY testing override (see FORCE_WEATHER above).
+          if (FORCE_WEATHER) {
+            weatherRain = weatherSnow = weatherStorm = weatherFog = false;
+            if (FORCE_WEATHER === 'rain') { weatherCode = 63; weatherRain = true; }
+            else if (FORCE_WEATHER === 'snow') { weatherCode = 75; weatherSnow = true; }
+            else if (FORCE_WEATHER === 'storm') { weatherCode = 95; weatherStorm = true; weatherRain = true; }
+          }
 
           adjustCloudsForWeather();
           if (weatherRain && rainDrops.length === 0) initRain();
@@ -2498,7 +2538,11 @@
     }
 
     function adjustCloudsForWeather() {
-      const target = Math.max(2, Math.round(weatherCloudCover / 100 * 15));
+      const rainy = weatherRain || weatherStorm;
+      // When it's raining, blanket the sky regardless of the reported cover.
+      const effCover = rainy ? Math.max(weatherCloudCover, 90) : weatherCloudCover;
+      const maxClouds = rainy ? 30 : 15;
+      const target = Math.max(2, Math.round(effCover / 100 * maxClouds));
       while (clouds.length < target) {
         clouds.push({
           x: Math.random() * canvas.width,
@@ -2506,38 +2550,41 @@
           vx: (0.15 + Math.random() * 0.3) * Math.max(0.5, weatherWindSpeed / 10),
           sprite: cloudSprites[Math.floor(Math.random() * cloudSprites.length)],
           scale: 8 + Math.floor(Math.random() * 6),
-          opacity: weatherCloudCover > 70 ? 0.4 + Math.random() * 0.3 : 0.25 + Math.random() * 0.25,
+          opacity: rainy ? 0.6 + Math.random() * 0.3
+                 : weatherCloudCover > 70 ? 0.4 + Math.random() * 0.3
+                 : 0.25 + Math.random() * 0.25,
         });
       }
       while (clouds.length > target) clouds.pop();
       for (const c of clouds) {
         c.vx = (0.15 + Math.random() * 0.3) * Math.max(0.5, weatherWindSpeed / 10);
+        if (rainy) c.opacity = 0.6 + Math.random() * 0.3;
       }
     }
 
     function initRain() {
-      const count = weatherStorm ? 300 : weatherCode >= 63 ? 200 : 100;
+      const count = weatherStorm ? 650 : weatherCode >= 63 ? 480 : 320;
       rainDrops = [];
       for (let i = 0; i < count; i++) {
         rainDrops.push({
           x: Math.random() * canvas.width * 1.3,
           y: Math.random() * canvas.height,
-          speed: 8 + Math.random() * 6,
-          len: 8 + Math.random() * 12,
+          speed: 10 + Math.random() * 7,
+          len: 12 + Math.random() * 16,
         });
       }
     }
 
     function initSnow() {
-      const count = weatherCode >= 73 ? 200 : 100;
+      const count = weatherCode >= 73 ? 450 : 300;
       snowFlakes = [];
       for (let i = 0; i < count; i++) {
         snowFlakes.push({
           x: Math.random() * canvas.width,
           y: Math.random() * canvas.height,
-          speed: 0.5 + Math.random() * 1.5,
+          speed: 0.7 + Math.random() * 1.8,
           wobble: Math.random() * Math.PI * 2,
-          size: 1 + Math.floor(Math.random() * 3),
+          size: 2 + Math.floor(Math.random() * 4),
         });
       }
     }
@@ -2545,8 +2592,8 @@
     function drawRain() {
       if (rainDrops.length === 0) return;
       const wind = weatherWindSpeed / 10;
-      ctx.strokeStyle = 'rgba(150,180,255,0.35)';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(190,205,255,0.6)';
+      ctx.lineWidth = 1.6;
       ctx.beginPath();
       for (const d of rainDrops) {
         d.y += d.speed;
@@ -2561,7 +2608,7 @@
 
     function drawSnow() {
       if (snowFlakes.length === 0) return;
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.fillStyle = 'rgba(255,255,255,0.95)';
       for (const s of snowFlakes) {
         s.wobble += 0.02;
         s.y += s.speed;
@@ -2572,9 +2619,14 @@
     }
 
     function drawOvercast() {
-      if (weatherCloudCover < 40) return;
-      const intensity = (weatherCloudCover - 40) / 60;
-      ctx.fillStyle = `rgba(90,90,100,${intensity * 0.3})`;
+      const rainy = weatherRain || weatherStorm;
+      if (!rainy && weatherCloudCover < 40) return;
+      // Rain/storm gets a heavy gray wash with a floor; otherwise scale with cover.
+      const intensity = rainy
+        ? Math.max(0.6, (weatherCloudCover - 40) / 60)
+        : (weatherCloudCover - 40) / 60;
+      const alpha = rainy ? intensity * 0.55 : intensity * 0.3;
+      ctx.fillStyle = `rgba(70,72,82,${alpha})`;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
 
@@ -2609,19 +2661,33 @@
     fetchWeather();
     setInterval(fetchWeather, 600000);
 
-    function drawCloud(cloud) {
+    // Rasterize a cloud's pixel grid to an offscreen canvas once (rebuilt only
+    // when the weather-driven gray tint changes), instead of running ~70
+    // fillRects per cloud every frame.
+    function buildCloudSprite(cloud, gray) {
       const sp = cloud.sprite;
       const px = cloud.scale;
-      ctx.globalAlpha = cloud.opacity;
-      const gray = weatherCloudCover > 80 ? '#b0b0b8' : weatherCloudCover > 60 ? '#d0d0d8' : '#fff';
-      ctx.fillStyle = gray;
+      const c = document.createElement('canvas');
+      c.width = sp[0].length * px;
+      c.height = sp.length * px;
+      const cx = c.getContext('2d');
+      cx.fillStyle = gray;
       for (let r = 0; r < sp.length; r++) {
-        for (let c = 0; c < sp[r].length; c++) {
-          if (sp[r][c]) {
-            ctx.fillRect(cloud.x + c * px, cloud.y + r * px, px, px);
-          }
+        for (let col = 0; col < sp[r].length; col++) {
+          if (sp[r][col]) cx.fillRect(col * px, r * px, px, px);
         }
       }
+      cloud.canvas = c;
+      cloud.grayKey = gray;
+    }
+
+    function drawCloud(cloud) {
+      const gray = (weatherRain || weatherStorm) ? '#7e818d'
+                 : weatherCloudCover > 80 ? '#b0b0b8'
+                 : weatherCloudCover > 60 ? '#d0d0d8' : '#fff';
+      if (!cloud.canvas || cloud.grayKey !== gray) buildCloudSprite(cloud, gray);
+      ctx.globalAlpha = cloud.opacity;
+      ctx.drawImage(cloud.canvas, cloud.x, cloud.y);
       ctx.globalAlpha = 1;
     }
 
@@ -2755,31 +2821,107 @@
       ctx.fillText(banner.text, bx + 42, by + bannerH / 2);
     }
 
-    function drawBird(bird) {
-      const frame = birdFrames[bird.frame];
+    // Weather accessories drawn over the bird's head. Pixel rows use `dr`,
+    // an offset from the head-top line (dr:0 = head top, negative = higher up).
+    // HAT_PAD reserves enough rows above the body for the tallest one.
+    const HAT_PAD = 4;
+    const headTopRow = HAT_PAD + 1; // padded-canvas row of the head-top (grid row 1)
+    const hatSprites = {
+      // Beanie for snow: red dome with a white pom on top and a white cuff.
+      beanie: [
+        {c:6,dr:-3,col:'#f5f5f5'},
+        {c:6,dr:-2,col:'#d24b4b'},
+        {c:5,dr:-1,col:'#d24b4b'},{c:6,dr:-1,col:'#d24b4b'},{c:7,dr:-1,col:'#d24b4b'},
+        {c:4,dr:0,col:'#f0f0f0'},{c:5,dr:0,col:'#f0f0f0'},{c:6,dr:0,col:'#f0f0f0'},{c:7,dr:0,col:'#f0f0f0'},{c:8,dr:0,col:'#f0f0f0'},
+      ],
+    };
+
+    function currentHatType() {
+      // Rain is shown via splash marks (drawRainSplash), not a worn accessory.
+      if (weatherSnow) return 'beanie';
+      return 'none';
+    }
+
+    // Rasterize a bird's 3 animation frames once to an offscreen canvas, with a
+    // weather hat baked in. Rebuilt only when the bird's color or hat changes,
+    // instead of running ~63 fillRects per bird every frame.
+    function buildBirdSprite(bird, hatType) {
       const px = bird.scale;
-      const cols = frame[0].length;
+      const cols = birdFrames[0][0].length;
+      const rows = birdFrames[0].length;
+      const fw = cols * px;
+      const fh = (rows + HAT_PAD) * px; // headroom for the hat
+      const yOff = HAT_PAD * px;         // body sits below the hat padding
+      const hat = hatSprites[hatType];
+      const c = document.createElement('canvas');
+      c.width = fw * birdFrames.length;
+      c.height = fh;
+      const cx = c.getContext('2d');
+      for (let f = 0; f < birdFrames.length; f++) {
+        const frame = birdFrames[f];
+        const ox = f * fw;
+        for (let r = 0; r < rows; r++) {
+          for (let col = 0; col < cols; col++) {
+            const val = frame[r][col];
+            if (val === 0) continue;
+            if (val === 1) cx.fillStyle = bird.color.body;
+            else if (val === 2) cx.fillStyle = bird.color.wing;
+            else if (val === 3) cx.fillStyle = bird.color.eye;
+            else if (val === 4) cx.fillStyle = bird.color.beak;
+            cx.fillRect(ox + col * px, yOff + r * px, px, px);
+          }
+        }
+        if (hat) {
+          for (const p of hat) {
+            cx.fillStyle = p.col;
+            cx.fillRect(ox + p.c * px, (headTopRow + p.dr) * px, px, px);
+          }
+        }
+      }
+      bird.sprite = c;
+      bird.fw = fw;
+      bird.fh = fh;
+      bird.topPad = yOff;
+      bird.hatType = hatType;
+    }
+
+    function drawBird(bird) {
+      const hatType = currentHatType();
+      if (!bird.sprite || bird.hatType !== hatType) buildBirdSprite(bird, hatType);
+      const fw = bird.fw, fh = bird.fh;
+      const sx = bird.frame * fw;
+      const dy = bird.y - bird.topPad; // keep the body where bird.y points
 
       ctx.save();
       if (bird.dir < 0) {
-        ctx.translate(bird.x + cols * px, bird.y);
+        ctx.translate(bird.x + fw, dy);
         ctx.scale(-1, 1);
+        ctx.drawImage(bird.sprite, sx, 0, fw, fh, 0, 0, fw, fh);
       } else {
-        ctx.translate(bird.x, bird.y);
-      }
-
-      for (let r = 0; r < frame.length; r++) {
-        for (let c = 0; c < cols; c++) {
-          const val = frame[r][c];
-          if (val === 0) continue;
-          if (val === 1) ctx.fillStyle = bird.color.body;
-          else if (val === 2) ctx.fillStyle = bird.color.wing;
-          else if (val === 3) ctx.fillStyle = bird.color.eye;
-          else if (val === 4) ctx.fillStyle = bird.color.beak;
-          ctx.fillRect(c * px, r * px, px, px);
-        }
+        ctx.drawImage(bird.sprite, sx, 0, fw, fh, bird.x, dy, fw, fh);
       }
       ctx.restore();
+    }
+
+    // Little raindrops bouncing off the bird — drawn each frame while it rains.
+    // Each mark is a tiny upward chevron (a splash) that bobs and blinks so the
+    // bird looks like it's being pelted, without wearing anything.
+    function drawRainSplash(bird) {
+      if (!bird.fw) return;
+      const t = Date.now();
+      const u = Math.max(1, Math.round(bird.scale * 0.4));
+      for (let k = 0; k < 3; k++) {
+        const bounce = Math.abs(Math.sin(t / 200 + k * 1.9 + bird.wobble * 3));
+        if (bounce < 0.25) continue; // intermittent impacts
+        const sx = Math.round(bird.x + bird.fw * (0.25 + 0.27 * k));
+        const sy = Math.round(bird.y - u - bounce * bird.scale * 1.6);
+        ctx.globalAlpha = 0.35 + bounce * 0.5;
+        ctx.fillStyle = 'rgba(205,220,255,1)';
+        ctx.fillRect(sx, sy + u, u, u);      // center (impact point)
+        ctx.fillRect(sx - u, sy, u, u);      // spray left-up
+        ctx.fillRect(sx + u, sy, u, u);      // spray right-up
+      }
+      ctx.globalAlpha = 1;
     }
 
     function lerpColor(c1, c2, t) {
@@ -2835,27 +2977,33 @@
       };
     }
 
-    function drawSky() {
-      const w = canvas.width, h = canvas.height;
+    // The sky is driven by wall-clock time, so it's effectively static
+    // frame-to-frame. Render it to an offscreen canvas and only rebuild when
+    // skyTime (or the canvas size) actually changes, then blit each frame.
+    const skyCanvas = document.createElement('canvas');
+    const skyCtx = skyCanvas.getContext('2d');
+    let skyCacheKey = '';
+
+    function renderSky(g, w, h) {
       const c = getSkyColorsAt(skyTime);
 
-      const grad = ctx.createLinearGradient(0, 0, 0, h);
+      const grad = g.createLinearGradient(0, 0, 0, h);
       grad.addColorStop(0, `rgb(${c.top[0]},${c.top[1]},${c.top[2]})`);
       grad.addColorStop(0.6, `rgb(${c.mid[0]},${c.mid[1]},${c.mid[2]})`);
       grad.addColorStop(1, `rgb(${c.bot[0]},${c.bot[1]},${c.bot[2]})`);
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, w, h);
+      g.fillStyle = grad;
+      g.fillRect(0, 0, w, h);
 
       // Stars at night
       const nightness = Math.max(0, 1 - Math.abs(skyTime % 4 - 2));  // peaks at phase 2
       if (nightness > 0.1) {
-        ctx.fillStyle = `rgba(255,255,255,${nightness * 0.8})`;
+        g.fillStyle = `rgba(255,255,255,${nightness * 0.8})`;
         // Deterministic star positions
         for (let s = 0; s < 60; s++) {
           const sx = ((s * 7919 + 31) % 997) / 997 * w;
           const sy = ((s * 6271 + 17) % 991) / 991 * h * 0.6;
           const sr = ((s * 3) % 3 === 0) ? 2 : 1;
-          ctx.fillRect(sx, sy, sr, sr);
+          g.fillRect(sx, sy, sr, sr);
         }
       }
 
@@ -2866,37 +3014,50 @@
         const sunY = h * sun.yFrac;
 
         // Glow
-        const glow = ctx.createRadialGradient(sunX, sunY, sun.radius * 0.3, sunX, sunY, sun.radius * 3);
+        const glow = g.createRadialGradient(sunX, sunY, sun.radius * 0.3, sunX, sunY, sun.radius * 3);
         glow.addColorStop(0, `rgba(${sun.color[0]},${sun.color[1]},${sun.color[2]},${sun.opacity * 0.4})`);
         glow.addColorStop(1, `rgba(${sun.color[0]},${sun.color[1]},${sun.color[2]},0)`);
-        ctx.fillStyle = glow;
-        ctx.fillRect(0, 0, w, h);
+        g.fillStyle = glow;
+        g.fillRect(0, 0, w, h);
 
         // Disc
-        ctx.globalAlpha = sun.opacity;
-        ctx.fillStyle = `rgb(${sun.color[0]},${sun.color[1]},${sun.color[2]})`;
-        ctx.beginPath();
-        ctx.arc(sunX, sunY, sun.radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
+        g.globalAlpha = sun.opacity;
+        g.fillStyle = `rgb(${sun.color[0]},${sun.color[1]},${sun.color[2]})`;
+        g.beginPath();
+        g.arc(sunX, sunY, sun.radius, 0, Math.PI * 2);
+        g.fill();
+        g.globalAlpha = 1;
       }
 
       // Moon during night
       if (nightness > 0.1) {
         const moonX = w * 0.2;
         const moonY = h * 0.18;
-        ctx.globalAlpha = nightness;
-        ctx.fillStyle = '#e8e8f0';
-        ctx.beginPath();
-        ctx.arc(moonX, moonY, 25, 0, Math.PI * 2);
-        ctx.fill();
+        g.globalAlpha = nightness;
+        g.fillStyle = '#e8e8f0';
+        g.beginPath();
+        g.arc(moonX, moonY, 25, 0, Math.PI * 2);
+        g.fill();
         // Crescent shadow
-        ctx.fillStyle = `rgb(${Math.round(8 + (1-nightness)*60)},${Math.round(8 + (1-nightness)*60)},${Math.round(30 + (1-nightness)*60)})`;
-        ctx.beginPath();
-        ctx.arc(moonX + 10, moonY - 3, 22, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
+        g.fillStyle = `rgb(${Math.round(8 + (1-nightness)*60)},${Math.round(8 + (1-nightness)*60)},${Math.round(30 + (1-nightness)*60)})`;
+        g.beginPath();
+        g.arc(moonX + 10, moonY - 3, 22, 0, Math.PI * 2);
+        g.fill();
+        g.globalAlpha = 1;
       }
+    }
+
+    function drawSky() {
+      const w = canvas.width, h = canvas.height;
+      // Quantize skyTime so the cache rebuilds on visible change, not every frame.
+      const key = w + 'x' + h + ':' + Math.round(skyTime * 200);
+      if (key !== skyCacheKey) {
+        skyCacheKey = key;
+        if (skyCanvas.width !== w) skyCanvas.width = w;
+        if (skyCanvas.height !== h) skyCanvas.height = h;
+        renderSky(skyCtx, w, h);
+      }
+      ctx.drawImage(skyCanvas, 0, 0);
     }
 
     // --- Lightning ---
@@ -3086,6 +3247,7 @@
           }
 
           drawBird(b);
+          if ((weatherRain || weatherStorm) && !b.banner) drawRainSplash(b);
           if (b.banner) drawBanner(b);
         }
       }
@@ -3115,8 +3277,15 @@
       }
     })();
 
+    const birdCountEl = document.getElementById('birdCount');
+    let lastBirdCount = -1;
     function updateBirdCount() {
-      document.getElementById('birdCount').textContent = birds.filter(b => !b.falling).length;
+      let n = 0;
+      for (let i = 0; i < birds.length; i++) if (!birds[i].falling) n++;
+      if (n !== lastBirdCount) {
+        lastBirdCount = n;
+        birdCountEl.textContent = n;
+      }
     }
 
     renderLeaderboard(null);
